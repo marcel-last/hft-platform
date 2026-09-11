@@ -1,0 +1,9 @@
+[project]
+name = "strategy-engine"
+version = "1.0.0"
+description = "HFT platform service S3: signal generation from book events and quotes, pluggable momentum/mean-reversion/spread-arbitrage strategies, order-intent emission"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,9 @@
+[project]
+name = "market-data-gateway"
+version = "1.0.0"
+description = "HFT platform service S1: venue feed ingestion, normalization, and quote distribution"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,9 @@
+[project]
+name = "order-book-builder"
+version = "1.0.0"
+description = "HFT platform service S2: L2 order book maintenance, top-of-book tracking, and event emission"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
