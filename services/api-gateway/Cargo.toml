@@ -1,0 +1,19 @@
+[package]
+name = "api-gateway"
+version = "1.0.0"
+edition = "2021"
+
+description = "S15 api-gateway: external-facing REST gateway — JWT validation, per-route authZ, and reverse proxy to internal services"
+
+[lib]
+name = "apigw"
+path = "src/lib.rs"
+
+[[bin]]
+name = "api-gateway"
+path = "src/main.rs"
+
+[dependencies]
+
+[profile.release]
+opt-level = 3
