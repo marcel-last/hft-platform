@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hft-platform/schemas/services/s13-audit-logger.schema.json",
+  "title": "S13 audit-logger — API surface",
+  "description": "Port 7730, prefix AUD-. Immutable, append-only, hash-chained audit trail. Endpoints: GET /healthz, /readyz, /events, /events/{event_id}, /events/export, /events/verify-chain, /stats; POST /events. Each record's hash = SHA-256 over canonical JSON of (event_id, ts_ns, source, kind, actor, data, prev_hash); the head's prev_hash is the 64-zero constant. ts_ns is server-stamped (submitter timestamps belong in data). Repeat (source, kind, canonical data) within the dedup window folds to the original record. Bounded chain eviction re-severs the head. verify-chain answers 207 when the chain is not intact. Errors: AUD-001 bad JSON (400), AUD-201 invalid event (400), AUD-202 bad id (400), AUD-203 bad limit (400), AUD-204 unknown event (404, evicted flag), AUD-404 no route (404).",
+  "type": "object",
+  "properties": {
+    "eventAppendRequest": {
+      "description": "POST /events — append one event. 'ts_ns' is REJECTED in the body (the server stamps receive time); occurrence timestamps belong inside 'data'.",
+      "type": "object",
+      "required": ["source", "kind", "actor"],
+      "additionalProperties": true,
+      "properties": {
+        "source": { "type": "string", "minLength": 1, "description": "Upstream service that produced the event (e.g. execution-gateway)." },
+        "kind": { "type": "string", "minLength": 1, "description": "Dotted event kind (e.g. order.submitted, risk.veto, config.updated)." },
+        "actor": { "type": "string", "minLength": 1, "description": "Who/what acted (service, operator, or account)." },
+        "data": { "type": "object", "description": "Arbitrary event payload; hashed as-is into the chain." },
+        "dedup_key": { "type": "string", "description": "Optional submitter hint for deduplication; default key derives from (source, kind, canonical data hash)." }
+      }
+    },
+    "eventAppendResponse": {
+      "description": "200 — status is 'appended' (new record) or 'duplicate' (folded to the original, whose record is returned with a 'reason').",
+      "type": "object",
+      "required": ["status", "event"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "enum": ["appended", "duplicate"] },
+        "event": { "$ref": "#/$defs/eventRecord" },
+        "reason": { "type": "string", "description": "Present when status is 'duplicate'." }
+      }
+    },
+    "eventListResponse": {
+      "description": "GET /events?source=&kind=&limit= — records newest-first; count matches the returned list.",
+      "type": "object",
+      "required": ["count", "events"],
+      "additionalProperties": false,
+      "properties": {
+        "count": { "type": "integer", "minimum": 0 },
+        "events": { "type": "array", "items": { "$ref": "#/$defs/eventRecord" } }
+      }
+    },
+    "eventGetResponse": {
+      "description": "GET /events/{event_id} — the record plus an on-demand single-record verification. 404 AUD-204 (evicted flag) when unknown.",
+      "type": "object",
+      "required": ["event", "verified", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "event": { "$ref": "#/$defs/eventRecord" },
+        "verified": { "type": "boolean" },
+        "reason": { "type": "string", "description": "Empty when verified is true." }
+      }
+    },
+    "eventExportResponse": {
+      "description": "GET /events/export?source=&kind=&limit= — a JSON envelope carrying the JSON-lines stream (one compact object per line) so the content type stays application/json; oldest first.",
+      "type": "object",
+      "required": ["count", "format", "order", "lines"],
+      "additionalProperties": false,
+      "properties": {
+        "count": { "type": "integer", "minimum": 0 },
+        "format": { "const": "json-lines" },
+        "order": { "const": "oldest_first" },
+        "lines": {
+          "type": "array",
+          "items": { "type": "string", "description": "One canonical (sorted-keys, compact) JSON record per element." }
+        }
+      }
+    },
+    "verifyChainResponse": {
+      "description": "GET /events/verify-chain — full walk: every hash and every prev_hash link recomputed. HTTP 200 when intact, 207 (Multi-Status) when not; the body always carries the report.",
+      "type": "object",
+      "required": ["intact", "verified_count", "chain_length", "truncated", "head_id", "tail_hash"],
+      "additionalProperties": false,
+      "properties": {
+        "intact": { "type": "boolean" },
+        "verified_count": { "type": "integer", "minimum": 0 },
+        "chain_length": { "type": "integer", "minimum": 0 },
+        "truncated": { "type": "boolean", "description": "true when verification stopped at max_verify_depth without reaching a fault." },
+        "head_id": { "type": ["string", "null"], "description": "The current head (oldest surviving) record id; null for an empty chain." },
+        "tail_hash": { "type": ["string", "null"], "description": "Hash of the newest record; null for an empty chain." },
+        "first_bad_index": { "type": "integer", "minimum": 0, "description": "Present on failure; 0-based position in chain order." },
+        "first_bad_id": { "type": "string", "description": "Present on failure; id of the first offending record." },
+        "reason": { "type": "string", "description": "Present on failure (content hash mismatch / broken link)." }
+      }
+    },
+    "statsResponse": {
+      "description": "GET /stats — chain length, counters, by_source/by_kind breakdowns, and the last verify report.",
+      "type": "object",
+      "required": ["chain_length", "appended", "duplicates", "evicted", "rejected", "by_source", "by_kind"],
+      "additionalProperties": true,
+      "properties": {
+        "chain_length": { "type": "integer", "minimum": 0 },
+        "appended": { "type": "integer", "minimum": 0 },
+        "duplicates": { "type": "integer", "minimum": 0 },
+        "evicted": { "type": "integer", "minimum": 0 },
+        "rejected": { "type": "integer", "minimum": 0 },
+        "by_source": { "type": "object", "additionalProperties": { "type": "integer" } },
+        "by_kind": { "type": "object", "additionalProperties": { "type": "integer" } },
+        "head_id": { "type": ["string", "null"] },
+        "tail_hash": { "type": ["string", "null"] },
+        "last_verified": { "$ref": "#/$defs/verifyChainResponse" }
+      }
+    }
+  },
+  "$defs": {
+    "eventRecord": {
+      "description": "One hash-chained record (audl.models.EventRecord.to_dict). 'hash' covers (event_id, ts_ns, source, kind, actor, data, prev_hash) via canonical JSON.",
+      "type": "object",
+      "required": ["event_id", "ts_ns", "source", "kind", "actor", "data", "prev_hash", "hash"],
+      "additionalProperties": false,
+      "properties": {
+        "event_id": { "type": "string", "pattern": "^EVT-[0-9a-f]{12}$", "description": "Sequential id: EVT- + 12 lowercase hex." },
+        "ts_ns": { "type": "integer", "minimum": 0, "description": "Server receive-time stamp (NOT submitter-supplied)." },
+        "source": { "type": "string" },
+        "kind": { "type": "string" },
+        "actor": { "type": "string" },
+        "data": { "type": "object" },
+        "prev_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Hash of the preceding record; the 64-zero constant at the chain head." },
+        "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "verifyChainResponse": {
+      "description": "The verify-chain report object (reused by /stats last_verified).",
+      "type": "object",
+      "required": ["intact", "verified_count", "chain_length", "truncated", "head_id", "tail_hash"],
+      "additionalProperties": false,
+      "properties": {
+        "intact": { "type": "boolean" },
+        "verified_count": { "type": "integer", "minimum": 0 },
+        "chain_length": { "type": "integer", "minimum": 0 },
+        "truncated": { "type": "boolean" },
+        "head_id": { "type": ["string", "null"] },
+        "tail_hash": { "type": ["string", "null"] },
+        "first_bad_index": { "type": "integer", "minimum": 0 },
+        "first_bad_id": { "type": "string" },
+        "reason": { "type": "string" }
+      }
+    }
+  }
+}

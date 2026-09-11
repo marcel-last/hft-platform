@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hft-platform/schemas/services/s09-portfolio-analytics.schema.json",
+  "title": "S9 portfolio-analytics — API surface",
+  "description": "Port 7690, prefix PFA-. Read-only analytics over the S6 position book: GET /healthz, /readyz, /pnl, /pnl/{symbol}, /metrics, /attribution, /var, /history, /stats. No mutating endpoints; refresh is an internal background loop that polls S6 /positions. Equity basis is cash-neutral (realized+unrealized); VaR/CVaR are expected losses (positive).",
+  "type": "object",
+  "properties": {
+    "pnlAggregateResponse": {
+      "description": "GET /pnl — aggregate P&L plus per-symbol breakdown (pfa.analytics_engine.pnl).",
+      "type": "object",
+      "required": ["ts_ns", "symbols_total", "totals", "symbols"],
+      "additionalProperties": false,
+      "properties": {
+        "ts_ns": { "type": "integer", "minimum": 0 },
+        "symbols_total": { "type": "integer", "minimum": 0 },
+        "totals": {
+          "type": "object",
+          "required": ["realized_pnl", "unrealized_pnl", "total_pnl", "market_value"],
+          "additionalProperties": false,
+          "properties": {
+            "realized_pnl": { "type": "number" },
+            "unrealized_pnl": { "type": "number" },
+            "total_pnl": { "type": "number" },
+            "market_value": { "type": "number" }
+          }
+        },
+        "symbols": { "type": "array", "items": { "$ref": "#/$defs/pnlRow" } }
+      }
+    },
+    "pnlSymbolResponse": {
+      "description": "GET /pnl/{symbol} — one PnlRow wrapped in {ts_ns, pnl}; 404 PFA-203 when the symbol is unknown.",
+      "type": "object",
+      "required": ["ts_ns", "pnl"],
+      "additionalProperties": false,
+      "properties": {
+        "ts_ns": { "type": "integer", "minimum": 0 },
+        "pnl": { "$ref": "#/$defs/pnlRow" }
+      }
+    },
+    "metricsResponse": {
+      "description": "GET /metrics — {ts_ns, metrics: PortfolioMetrics.to_dict}. Sharpe is annualized (null when zero-variance/insufficient); drawdowns are negative percentages; annualized_return is null below one period.",
+      "type": "object",
+      "required": ["ts_ns", "metrics"],
+      "additionalProperties": false,
+      "properties": {
+        "ts_ns": { "type": "integer", "minimum": 0 },
+        "metrics": {
+          "type": "object",
+          "required": ["samples", "returns", "sharpe_ratio", "max_drawdown_pct", "current_drawdown_pct", "win_rate_pct", "mean_return", "stdev_return", "annualized_return"],
+          "additionalProperties": false,
+          "properties": {
+            "samples": { "type": "integer", "minimum": 0 },
+            "returns": { "type": "integer", "minimum": 0 },
+            "sharpe_ratio": { "type": ["number", "null"] },
+            "max_drawdown_pct": { "type": "number" },
+            "current_drawdown_pct": { "type": "number" },
+            "win_rate_pct": { "type": ["number", "null"] },
+            "mean_return": { "type": "number" },
+            "stdev_return": { "type": "number" },
+            "annualized_return": { "type": ["number", "null"] }
+          }
+        }
+      }
+    },
+    "varResponse": {
+      "description": "GET /var — {ts_ns, var: VarResult.to_dict[, note]}. method is 'historical' or 'parametric'; VaR/CVaR are expected losses (positive) and null below history.min_samples_for_var (insufficient_data=true).",
+      "type": "object",
+      "required": ["ts_ns", "var"],
+      "additionalProperties": false,
+      "properties": {
+        "ts_ns": { "type": "integer", "minimum": 0 },
+        "var": {
+          "type": "object",
+          "required": ["method", "confidence", "samples", "var", "cvar", "insufficient_data"],
+          "additionalProperties": false,
+          "properties": {
+            "method": { "enum": ["historical", "parametric"] },
+            "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+            "samples": { "type": "integer", "minimum": 0 },
+            "var": { "type": ["number", "null"] },
+            "cvar": { "type": ["number", "null"] },
+            "insufficient_data": { "type": "boolean" }
+          }
+        },
+        "note": { "type": "string", "description": "Present when insufficient_data is true." }
+      }
+    },
+    "attributionResponse": {
+      "description": "GET /attribution — per-symbol decomposition of total P&L (pfa.analytics_engine.attribution); weight_pct is each symbol's share of |grand_total| and sums to 100.",
+      "type": "object",
+      "required": ["ts_ns", "grand_total", "realized_total", "unrealized_total", "symbols"],
+      "additionalProperties": false,
+      "properties": {
+        "ts_ns": { "type": "integer", "minimum": 0 },
+        "grand_total": { "type": "number" },
+        "realized_total": { "type": "number" },
+        "unrealized_total": { "type": "number" },
+        "symbols": { "type": "array", "items": { "$ref": "#/$defs/attributionRow" } }
+      }
+    },
+    "historyResponse": {
+      "description": "GET /history — bounded equity/return series, newest first (pfa.controller.history).",
+      "type": "object",
+      "required": ["ts_ns", "count", "series"],
+      "additionalProperties": false,
+      "properties": {
+        "ts_ns": { "type": "integer", "minimum": 0 },
+        "count": { "type": "integer", "minimum": 0 },
+        "series": { "type": "array", "items": { "type": "object" } }
+      }
+    }
+  },
+  "$defs": {
+    "pnlRow": {
+      "description": "Per-symbol realized + unrealized P&L (pfa.models.PnlRow.to_dict).",
+      "type": "object",
+      "required": ["symbol", "account", "net_qty", "side", "avg_price", "mark", "market_value", "realized_pnl", "unrealized_pnl", "total_pnl"],
+      "additionalProperties": false,
+      "properties": {
+        "symbol": { "type": "string" },
+        "account": { "type": "string" },
+        "net_qty": { "type": "integer" },
+        "side": { "enum": ["LONG", "SHORT", "FLAT"] },
+        "avg_price": { "type": "number" },
+        "mark": { "type": "number" },
+        "market_value": { "type": "number" },
+        "realized_pnl": { "type": "number" },
+        "unrealized_pnl": { "type": "number" },
+        "total_pnl": { "type": "number" }
+      }
+    },
+    "attributionRow": {
+      "description": "One symbol's contribution (pfa.models.AttributionRow.to_dict).",
+      "type": "object",
+      "required": ["symbol", "realized", "unrealized", "total", "weight_pct"],
+      "additionalProperties": false,
+      "properties": {
+        "symbol": { "type": "string" },
+        "realized": { "type": "number" },
+        "unrealized": { "type": "number" },
+        "total": { "type": "number" },
+        "weight_pct": { "type": "number", "minimum": 0, "maximum": 100 }
+      }
+    }
+  }
+}

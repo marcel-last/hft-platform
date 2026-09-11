@@ -1,0 +1,268 @@
+# =============================================================================
+# HFT Platform — docker-compose.yml
+# 15 services, ports 7610-7750. Run from this directory:
+#   docker compose up --build
+# The 10 Python services are built with deploy/docker/Dockerfile.python and
+# the 5 Rust services with deploy/docker/Dockerfile.rust; see README.md.
+# =============================================================================
+name: hft-platform
+
+services:
+  # --- Market data (S1) ------------------------------------------------------
+  market-data-gateway:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile.python
+      args: { SERVICE: market-data-gateway, PKG: mdg, PORT: "7610" }
+    image: hft/market-data-gateway:1.0.0
+    command: ["python", "-m", "mdg.main", "--mock"]
+    ports: ["7610:7610"]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket; socket.create_connection(('127.0.0.1', 7610), 1).close()\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  # --- Order book (S2) ---------------------------------------------------------
+  order-book-builder:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile.python
+      args: { SERVICE: order-book-builder, PKG: obb, PORT: "7620" }
+    image: hft/order-book-builder:1.0.0
+    ports: ["7620:7620"]
+    depends_on: [market-data-gateway]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket; socket.create_connection(('127.0.0.1', 7620), 1).close()\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  # --- Signals (S3) ---------------------------------------------------------
+  strategy-engine:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile.python
+      args: { SERVICE: strategy-engine, PKG: ste, PORT: "7630" }
+    image: hft/strategy-engine:1.0.0
+    ports: ["7630:7630"]
+    depends_on: [market-data-gateway, order-book-builder]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket; socket.create_connection(('127.0.0.1', 7630), 1).close()\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  # --- Execution (S4, Rust) ------------------------------------------------------
+  execution-gateway:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile.rust
+      args: { SERVICE: execution-gateway }
+    image: hft/execution-gateway:1.0.0
+    ports: ["7640:7640"]
+    depends_on: [strategy-engine]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket; socket.create_connection(('127.0.0.1', 7640), 1).close()\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  # --- Risk (S5) ---------------------------------------------------------
+  risk-manager:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile.python
+      args: { SERVICE: risk-manager, PKG: rkm, PORT: "7650" }
+    image: hft/risk-manager:1.0.0
+    ports: ["7650:7650"]
+    depends_on: [order-book-builder, strategy-engine, execution-gateway, alerting-service, audit-logger]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket; socket.create_connection(('127.0.0.1', 7650), 1).close()\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  # --- Positions (S6) ------------------------------------------------------
+  position-keeper:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile.python
+      args: { SERVICE: position-keeper, PKG: posk, PORT: "7660" }
+    image: hft/position-keeper:1.0.0
+    ports: ["7660:7660"]
+    depends_on: [execution-gateway, order-book-builder]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket; socket.create_connection(('127.0.0.1', 7660), 1).close()\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  # --- Latency (S7, Rust) ------------------------------------------------------
+  latency-monitor:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile.rust
+      args: { SERVICE: latency-monitor }
+    image: hft/latency-monitor:1.0.0
+    ports: ["7670:7670"]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket; socket.create_connection(('127.0.0.1', 7670), 1).close()\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  # --- Data quality (S8) --------------------------------------------------
+  data-quality-monitor:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile.python
+      args: { SERVICE: data-quality-monitor, PKG: dqm, PORT: "7680" }
+    image: hft/data-quality-monitor:1.0.0
+    ports: ["7680:7680"]
+    depends_on: [market-data-gateway, order-book-builder, alerting-service]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket; socket.create_connection(('127.0.0.1', 7680), 1).close()\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  # --- Analytics (S9) ------------------------------------------------------
+  portfolio-analytics:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile.python
+      args: { SERVICE: portfolio-analytics, PKG: pfa, PORT: "7690" }
+    image: hft/portfolio-analytics:1.0.0
+    ports: ["7690:7690"]
+    depends_on: [position-keeper]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket; socket.create_connection(('127.0.0.1', 7690), 1).close()\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  # --- Alerting (S10, Rust) ----------------------------------------------------
+  alerting-service:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile.rust
+      args: { SERVICE: alerting-service }
+    image: hft/alerting-service:1.0.0
+    ports: ["7700:7700"]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket; socket.create_connection(('127.0.0.1', 7700), 1).close()\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  # --- Config (S11) ------------------------------------------------------
+  config-service:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile.python
+      args: { SERVICE: config-service, PKG: cfgs, PORT: "7710" }
+    image: hft/config-service:1.0.0
+    ports: ["7710:7710"]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket; socket.create_connection(('127.0.0.1', 7710), 1).close()\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  # --- Auth (S12, Rust) ------------------------------------------------------
+  auth-service:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile.rust
+      args: { SERVICE: auth-service }
+    image: hft/auth-service:1.0.0
+    command: ["--bind", "0.0.0.0", "--port", "7720"]
+    ports: ["7720:7720"]
+    # Uncomment to pin the signing key across restarts (see env.example):
+    # environment:
+    #   AUTH_KEY_KID: "kid-prod-001"
+    #   AUTH_KEY_SECRET: "change-me"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket; socket.create_connection(('127.0.0.1', 7720), 1).close()\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  # --- Audit (S13) -------------------------------------------------------
+  audit-logger:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile.python
+      args: { SERVICE: audit-logger, PKG: audl, PORT: "7730" }
+    image: hft/audit-logger:1.0.0
+    ports: ["7730:7730"]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket; socket.create_connection(('127.0.0.1', 7730), 1).close()\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  # --- Settlement (S14) ------------------------------------------------------
+  settlement-service:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile.python
+      args: { SERVICE: settlement-service, PKG: stls, PORT: "7740" }
+    image: hft/settlement-service:1.0.0
+    # --positions-url: the S6 ingest endpoint defaults to 127.0.0.1:7660 (host
+    # mode); in the platform network it must be the S6 container DNS name.
+    command: ["python", "-m", "stls.main", "--positions-url", "http://position-keeper:7660"]
+    ports: ["7740:7740"]
+    depends_on: [position-keeper]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket; socket.create_connection(('127.0.0.1', 7740), 1).close()\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  # --- API gateway (S15, Rust) — external entry point ----------------------
+  api-gateway:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile.rust
+      args: { SERVICE: api-gateway }
+    image: hft/api-gateway:1.0.0
+    command: ["--bind", "0.0.0.0", "--port", "7750"]
+    ports: ["7750:7750"]
+    depends_on: [auth-service, portfolio-analytics, settlement-service]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket; socket.create_connection(('127.0.0.1', 7750), 1).close()\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped

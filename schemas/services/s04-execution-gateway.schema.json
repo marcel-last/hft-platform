@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hft-platform/schemas/services/s04-execution-gateway.schema.json",
+  "title": "S4 execution-gateway — API surface",
+  "description": "Port 7640, prefix EXG-. Endpoints (from router): GET /healthz, /readyz, /orders, /orders/{id}, /fills; POST /orders (order intent); PATCH /orders/{id} (modify); DELETE /orders/{id} (cancel, no body). POST /orders accepts the S3 OrderIntent dict plus aliases (see parse_intent in models.rs). Errors: EXG-2xx bad request (400), EXG-2xx unknown order (404), 409 on cancel/modify of a terminal order, 404/405 structured like every other service.",
+  "type": "object",
+  "properties": {
+    "orderIntentRequest": {
+      "description": "POST /orders — an order intent. Primary keys (S3 OrderIntent.to_dict) with aliases: sym->symbol, ven->venue, quantity->qty, limit_price/px->limit_px. 'id' and 'venue' are optional (server-stamped / default venue when absent).",
+      "type": "object",
+      "required": ["symbol", "side", "qty", "limit_px"],
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string", "description": "Optional client id; absent => server-stamped ORD-<now_ns>." },
+        "symbol": { "type": "string", "minLength": 1, "description": "Canonical symbol (alias: sym)." },
+        "venue": { "type": "string", "description": "Venue id (alias: ven); absent => default venue from config." },
+        "side": { "enum": ["BUY", "SELL"] },
+        "qty": { "type": "integer", "minimum": 1, "description": "Quantity in lots (alias: quantity)." },
+        "limit_px": { "type": "number", "exclusiveMinimum": 0, "description": "Limit price (aliases: limit_price, px)." },
+        "signal_id": { "type": "string", "description": "Optional; originating signal." },
+        "strategy_id": { "type": "string", "description": "Optional; originating strategy." }
+      }
+    },
+    "modifyOrderRequest": {
+      "description": "PATCH /orders/{id} — modify an open order; at least one of qty / limit_px required.",
+      "type": "object",
+      "required": [],
+      "anyOf": [
+        { "required": ["qty"] },
+        { "required": ["limit_px"] }
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "qty": { "type": "integer", "minimum": 0, "description": "New total quantity (alias: quantity)." },
+        "limit_px": { "type": "number", "exclusiveMinimum": 0, "description": "New limit price (alias: limit_price)." }
+      }
+    },
+    "order": {
+      "description": "Order as returned by /orders, /orders/{id}, and /orders (Order.to_json).",
+      "type": "object",
+      "required": ["id", "symbol", "venue", "side", "qty", "filled_qty", "remaining_qty", "limit_px", "state", "created_ns", "updated_ns"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "symbol": { "type": "string" },
+        "venue": { "type": "string" },
+        "side": { "enum": ["BUY", "SELL"] },
+        "qty": { "type": "integer" },
+        "filled_qty": { "type": "integer" },
+        "remaining_qty": { "type": "integer" },
+        "limit_px": { "type": "number" },
+        "state": { "enum": ["NEW", "PARTIALLY_FILLED", "FILLED", "CANCELED", "REJECTED"] },
+        "created_ns": { "type": "integer" },
+        "updated_ns": { "type": "integer" },
+        "signal_id": { "type": "string" },
+        "strategy_id": { "type": "string" }
+      }
+    },
+    "fill": {
+      "description": "A fill as returned by /fills and /orders/{id}/fills (Fill.to_json).",
+      "type": "object",
+      "required": ["id", "order_id", "symbol", "venue", "side", "qty", "price", "ts_ns"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "order_id": { "type": "string" },
+        "symbol": { "type": "string" },
+        "venue": { "type": "string" },
+        "side": { "enum": ["BUY", "SELL"] },
+        "qty": { "type": "integer" },
+        "price": { "type": "number" },
+        "ts_ns": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

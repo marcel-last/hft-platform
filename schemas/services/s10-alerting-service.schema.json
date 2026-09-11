@@ -1,0 +1,171 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hft-platform/schemas/services/s10-alerting-service.schema.json",
+  "title": "S10 alerting-service — API surface",
+  "description": "Port 7700, prefix ALT-. Endpoints: GET /healthz, /readyz, /alerts, /alerts/{id}, /alerts/dispatch, /stats; POST /alerts (submit occurrence), /alerts/ack, /alerts/{id}/resolve. Dedup/suppression key is (source, category, canonical context JSON) — severity is deliberately excluded so a severity change escalates the same logical alert. Escalation is lazy (WARNING->CRITICAL, CRITICAL->needs_oncall) and acknowledgement freezes the effective severity. Errors: ALT-200 bad request (400), ALT-201 unauthorized source (403), ALT-202 unknown alert (404), ALT-203 ack of resolved (409), ALT-404 no route (404).",
+  "type": "object",
+  "properties": {
+    "alertSubmitRequest": {
+      "description": "POST /alerts — one alert occurrence. source/category/severity are required; message defaults to \"\"; context defaults to {}; ts_ns falls back to receive time; id is an optional client hint.",
+      "type": "object",
+      "required": ["source", "category", "severity"],
+      "additionalProperties": false,
+      "properties": {
+        "source": { "type": "string", "minLength": 1, "description": "Upstream service name (allow-list gated; ALT-201 when disallowed)." },
+        "category": { "type": "string", "minLength": 1, "description": "Stable condition identifier used for dedup (e.g. kill_switch_engaged)." },
+        "severity": { "enum": ["INFO", "WARNING", "CRITICAL"], "description": "Case-insensitive on ingest; synonyms (warn/error) accepted." },
+        "message": { "type": "string", "description": "Single-line human description; optional." },
+        "context": { "type": "object", "description": "Free-form structured context; part of the dedup key." },
+        "ts_ns": { "type": "integer", "minimum": 0, "description": "Occurrence timestamp (ns); defaults to receive time." },
+        "id": { "type": "string", "description": "Optional client-supplied id." }
+      }
+    },
+    "alertSubmitResponse": {
+      "description": "200 — how the occurrence was treated plus the logical alert.",
+      "type": "object",
+      "required": ["outcome", "alert"],
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {
+          "type": "object",
+          "required": ["alert_id", "is_new", "suppressed", "occurrences", "severity"],
+          "additionalProperties": false,
+          "properties": {
+            "alert_id": { "type": "string" },
+            "is_new": { "type": "boolean" },
+            "suppressed": { "type": "boolean", "description": "true when folded into an existing open alert." },
+            "occurrences": { "type": "integer", "minimum": 1 },
+            "severity": { "enum": ["INFO", "WARNING", "CRITICAL"], "description": "Effective (post-escalation) severity." }
+          }
+        },
+        "alert": { "$ref": "#/$defs/logicalAlert" }
+      }
+    },
+    "alertListResponse": {
+      "description": "GET /alerts — optional query filters: source, state (ACTIVE/ACKNOWLEDGED/RESOLVED), severity, limit.",
+      "type": "object",
+      "required": ["count", "alerts"],
+      "additionalProperties": false,
+      "properties": {
+        "count": { "type": "integer", "minimum": 0 },
+        "alerts": { "type": "array", "items": { "$ref": "#/$defs/logicalAlert" } }
+      }
+    },
+    "alertAckRequest": {
+      "description": "POST /alerts/ack — acknowledge a logical alert.",
+      "type": "object",
+      "required": ["alert_id"],
+      "additionalProperties": false,
+      "properties": {
+        "alert_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "alertAckResponse": {
+      "description": "200 — the acknowledgement ticket plus the alert's post-ack state.",
+      "type": "object",
+      "required": ["ticket", "alert"],
+      "additionalProperties": false,
+      "properties": {
+        "ticket": {
+          "type": "object",
+          "required": ["alert_id", "state", "severity", "needs_oncall", "ts_ns"],
+          "additionalProperties": false,
+          "properties": {
+            "alert_id": { "type": "string" },
+            "state": { "enum": ["ACTIVE", "ACKNOWLEDGED", "RESOLVED"] },
+            "severity": { "enum": ["INFO", "WARNING", "CRITICAL"], "description": "Post-escalation severity at ack time (frozen from now on)." },
+            "needs_oncall": { "type": "boolean" },
+            "ts_ns": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "alert": { "$ref": "#/$defs/logicalAlert" }
+      }
+    },
+    "alertResolveResponse": {
+      "description": "POST /alerts/{id}/resolve — idempotent; returns the (final) state.",
+      "type": "object",
+      "required": ["alert_id", "state"],
+      "additionalProperties": false,
+      "properties": {
+        "alert_id": { "type": "string" },
+        "state": { "enum": ["RESOLVED"] }
+      }
+    },
+    "alertDispatchResponse": {
+      "description": "GET /alerts/dispatch — bounded dispatch log, newest first; ?limit= optional.",
+      "type": "object",
+      "required": ["count", "dispatches"],
+      "additionalProperties": false,
+      "properties": {
+        "count": { "type": "integer", "minimum": 0 },
+        "dispatches": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["alert_id", "source", "category", "severity", "needs_oncall", "ts_ns"],
+            "additionalProperties": false,
+            "properties": {
+              "alert_id": { "type": "string" },
+              "source": { "type": "string" },
+              "category": { "type": "string" },
+              "severity": { "enum": ["INFO", "WARNING", "CRITICAL"] },
+              "needs_oncall": { "type": "boolean" },
+              "ts_ns": { "type": "integer", "minimum": 0 }
+            }
+          }
+        }
+      }
+    },
+    "statsResponse": {
+      "description": "GET /stats — aggregate counters.",
+      "type": "object",
+      "required": ["received_total", "new_alerts_total", "suppressed_total", "escalated_total", "oncall_total", "acks_total", "tracked_alerts", "active_alerts"],
+      "additionalProperties": false,
+      "properties": {
+        "received_total": { "type": "integer", "minimum": 0 },
+        "new_alerts_total": { "type": "integer", "minimum": 0 },
+        "suppressed_total": { "type": "integer", "minimum": 0 },
+        "escalated_total": { "type": "integer", "minimum": 0 },
+        "oncall_total": { "type": "integer", "minimum": 0 },
+        "acks_total": { "type": "integer", "minimum": 0 },
+        "tracked_alerts": { "type": "integer", "minimum": 0 },
+        "active_alerts": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "readyz": {
+      "description": "GET /readyz — the common {status, reasons} plus active/tracked alert counts.",
+      "type": "object",
+      "required": ["status", "reasons", "active_alerts", "tracked_alerts"],
+      "additionalProperties": true,
+      "properties": {
+        "status": { "enum": ["ready", "not_ready"] },
+        "reasons": { "type": "array", "items": { "type": "string" } },
+        "active_alerts": { "type": "integer", "minimum": 0 },
+        "tracked_alerts": { "type": "integer", "minimum": 0 }
+      }
+    }
+  },
+  "$defs": {
+    "logicalAlert": {
+      "description": "A logical alert as returned by /alerts, /alerts/{id}, and embedded in submit/ack responses (LogicalAlert::to_json).",
+      "type": "object",
+      "required": ["id", "source", "category", "severity", "effective_severity", "message", "context", "created_ns", "last_seen_ns", "occurrences", "state", "needs_oncall"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "description": "Server-assigned logical alert id (ALT-<seq>)." },
+        "source": { "type": "string" },
+        "category": { "type": "string" },
+        "severity": { "enum": ["INFO", "WARNING", "CRITICAL"], "description": "Base severity as first observed." },
+        "effective_severity": { "enum": ["INFO", "WARNING", "CRITICAL"], "description": "Post-escalation severity (>= base)." },
+        "message": { "type": "string" },
+        "context": { "type": "object" },
+        "created_ns": { "type": "integer", "minimum": 0 },
+        "last_seen_ns": { "type": "integer", "minimum": 0, "description": "Last occurrence time — basis for lazy escalation aging." },
+        "occurrences": { "type": "integer", "minimum": 1 },
+        "state": { "enum": ["ACTIVE", "ACKNOWLEDGED", "RESOLVED"] },
+        "needs_oncall": { "type": "boolean" },
+        "ack_ns": { "type": "integer", "minimum": 0, "description": "Present only once acknowledged." }
+      }
+    }
+  }
+}

@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hft-platform/schemas/dependency-map.schema.json",
+  "title": "HFT Platform dependency map",
+  "description": "Shape of the repo-root dependency-map.json: services with their metadata, runtime caller->callee edges, and free-form notes.",
+  "type": "object",
+  "required": ["$schema", "version", "generated", "description", "services", "edges", "notes"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Self-reference to this schema file (relative to the repo root)."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "Semantic version of the map document itself."
+    },
+    "generated": {
+      "type": "string",
+      "description": "ISO-8601 UTC timestamp of the last regeneration.",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "services": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/service" }
+    },
+    "edges": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/edge" }
+    },
+    "notes": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "$defs": {
+    "serviceRef": {
+      "type": "string",
+      "pattern": "^S([1-9]|1[0-5])$",
+      "description": "Service id, S1..S15."
+    },
+    "service": {
+      "type": "object",
+      "required": [
+        "id", "name", "dir", "language", "package", "port",
+        "status", "description", "upstream", "downstream", "endpoints"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/serviceRef" },
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+          "description": "kebab-case directory/service name."
+        },
+        "dir": {
+          "type": "string",
+          "pattern": "^services/[a-z0-9]+(-[a-z0-9]+)*$"
+        },
+        "language": { "enum": ["python", "rust"] },
+        "package": {
+          "type": ["string", "null"],
+          "pattern": "^[a-z][a-z0-9]*$",
+          "description": "Python package name; null for Rust services."
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 7610,
+          "maximum": 7750,
+          "description": "TCP listen port (port map 7610-7750, step 10)."
+        },
+        "status": { "enum": ["planned", "in_progress", "complete", "deprecated"] },
+        "last_verified": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "description": "Optional; date (ISO-8601) of the last live-verification milestone."
+        },
+        "description": { "type": "string", "minLength": 1 },
+        "upstream": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/serviceRef" },
+          "description": "Services this service calls (its callees / dependencies)."
+        },
+        "downstream": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/serviceRef" },
+          "description": "Services that call this one (its callers)."
+        },
+        "endpoints": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^(GET|POST|PUT|PATCH|DELETE|HEAD) /\\S*$"
+          },
+          "description": "HTTP method + path templates ({param} style allowed)."
+        }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "required": ["from", "to", "protocol", "description"],
+      "additionalProperties": false,
+      "properties": {
+        "from": { "$ref": "#/$defs/serviceRef", "description": "Caller (client)." },
+        "to": { "$ref": "#/$defs/serviceRef", "description": "Callee (server)." },
+        "protocol": {
+          "enum": ["http-request", "http-stream", "http-longpoll"],
+          "description": "All traffic is HTTP/JSON; http-stream = chunked JSON-lines, http-longpoll = hold-untill-change."
+        },
+        "description": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

@@ -1,0 +1,32 @@
+# syntax=docker/dockerfile:1.4
+# Shared image for all 10 Python (stdlib-only) HFT platform services.
+#
+# Build usage (run from the repo root):
+#   docker build -f deploy/docker/Dockerfile.python \
+#     --build-arg SERVICE=order-book-builder --build-arg PKG=obb \
+#     -t hft/order-book-builder:1.0.0 .
+#
+# --build-arg SERVICE : services/ subdirectory (kebab-case, matches compose name)
+# --build-arg PKG     : importable Python package name (src/ layout, e.g. "obb")
+#
+# Platform constraint: Python stdlib only — no runtime dependencies are pip
+# installed. (pytest is deliberately absent from the runtime image; the test
+# suite is run on the host, see deploy/README.md.)
+FROM python:3.12-slim
+ARG SERVICE
+ARG PKG
+ARG PORT
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app/src \
+    PKG=${PKG} \
+    HFT_SERVICE=${SERVICE}
+WORKDIR /app
+COPY services/${SERVICE}/pyproject.toml /app/pyproject.toml
+COPY services/${SERVICE}/src/ /app/src/
+EXPOSE ${PORT}
+# ThreadingHTTPServer runs as a daemon thread; the main thread owns SIGTERM /
+# SIGINT handling and performs the service's clean-shutdown sequence.
+STOPSIGNAL SIGTERM
+# Shell form so the PKG env (baked from the build arg) expands at start.
+CMD python -m ${PKG}.main

@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hft-platform/schemas/services/s03-strategy-engine.schema.json",
+  "title": "S3 strategy-engine — API surface",
+  "description": "Port 7630, prefix STE-. Endpoints (from router.py): GET /healthz, /readyz, /signals, /signals/{signal_id}, /strategies, /intents, /stats; POST /pause, /resume (no body); POST /strategies/pause, /strategies/resume (body: {strategy_id}). Signal and intent shapes come from ste.models (Signal.to_dict, OrderIntent.to_dict).",
+  "type": "object",
+  "properties": {
+    "strategyPauseResumeRequest": {
+      "description": "POST /strategies/pause and /strategies/resume — target one strategy by id.",
+      "type": "object",
+      "required": ["strategy_id"],
+      "additionalProperties": false,
+      "properties": {
+        "strategy_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "signal": {
+      "description": "A trading signal (ste.models.Signal.to_dict).",
+      "type": "object",
+      "required": ["id", "strategy_id", "symbol", "side", "strength", "ref_px", "qty", "status", "created_ns"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^SIG-[0-9]+$" },
+        "strategy_id": { "type": "string" },
+        "symbol": { "type": "string", "description": "Canonical symbol." },
+        "side": { "enum": ["BUY", "SELL"] },
+        "reason": { "type": "string" },
+        "strength": { "type": "number", "description": "Normalized signal strength, rounded to 6 decimals." },
+        "ref_px": { "type": "number", "description": "Price at which the signal fired (mid or touch)." },
+        "qty": { "type": "integer", "minimum": 0, "description": "Suggested quantity (lots) before capping." },
+        "status": { "enum": ["OPEN", "CLOSED", "EXPIRED"] },
+        "created_ns": { "type": "integer", "minimum": 0 },
+        "closed_ns": { "type": ["integer", "null"], "minimum": 0 },
+        "age_ms": { "type": "integer" }
+      }
+    },
+    "orderIntent": {
+      "description": "An order intent (ste.models.OrderIntent.to_dict); this exact dict is what S4 POST /orders accepts (see s04 schema).",
+      "type": "object",
+      "required": ["id", "signal_id", "strategy_id", "symbol", "side", "qty", "limit_px", "notional", "created_ns", "acknowledged"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^INT-[0-9]+$" },
+        "signal_id": { "type": "string" },
+        "strategy_id": { "type": "string" },
+        "symbol": { "type": "string", "description": "Canonical symbol." },
+        "side": { "enum": ["BUY", "SELL"] },
+        "qty": { "type": "integer", "minimum": 0, "description": "Capped quantity (lots)." },
+        "limit_px": { "type": "number", "minimum": 0 },
+        "notional": { "type": "number", "description": "qty * limit_px, rounded to 4 decimals." },
+        "created_ns": { "type": "integer", "minimum": 0 },
+        "acknowledged": { "type": "boolean" }
+      }
+    }
+  }
+}

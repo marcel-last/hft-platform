@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hft-platform/schemas/quote-wire.schema.json",
+  "title": "Canonical quote wire format",
+  "description": "Normalized quote as distributed by market-data-gateway (S1) to all downstream consumers (S2, S3, S8). Defined in CONVENTIONS.md §4; serialized by mdg.models.quote_to_wire. One object per JSON line in the streaming (chunked) distribution; the same dict also appears in JSON array/list responses.",
+  "type": "object",
+  "required": [
+    "v", "sym", "ven", "seq", "act", "side", "px", "qty",
+    "lvl", "tick", "q", "vt", "rt", "nl"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "v": {
+      "const": 1,
+      "description": "Wire format version (integer, not a string)."
+    },
+    "sym": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Canonical (platform-wide) symbol, e.g. \"EU_STOXX50_CONT\"."
+    },
+    "ven": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Venue id, e.g. \"EUREX\"."
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Venue sequence number."
+    },
+    "act": {
+      "enum": ["N", "M", "D", "E", "B", "O"],
+      "description": "Action: N=new level, M=modify, D=delete, E=execute, B=bidding tick, O=offering tick."
+    },
+    "side": {
+      "enum": ["BID", "ASK", "LAST", "UNKNOWN"],
+      "description": "Side of the message."
+    },
+    "px": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Price (float; prices are the one place floats are allowed on the wire)."
+    },
+    "qty": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Quantity in lots."
+    },
+    "lvl": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Depth level; 1 = best."
+    },
+    "tick": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "description": "Tick size for the instrument."
+    },
+    "q": {
+      "enum": ["FRESH", "STALE_WARN", "STALE", "GAP_SUSPECT", "OUT_OF_ORDER"],
+      "description": "Data-quality tag assigned by the gateway's quality monitor."
+    },
+    "vt": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Venue timestamp, int64 nanoseconds since Unix epoch."
+    },
+    "rt": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Receive timestamp at the gateway, int64 ns since Unix epoch. rt >= vt."
+    },
+    "nl": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Gateway normalization latency (rt - vt), int64 ns."
+    }
+  }
+}

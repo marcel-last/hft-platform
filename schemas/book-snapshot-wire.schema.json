@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hft-platform/schemas/book-snapshot-wire.schema.json",
+  "title": "Book snapshot wire format",
+  "description": "L2 order book snapshot as served by order-book-builder (S2) to downstream consumers (S3, S5, S8, S9-via-S6, S14-via-S6). Defined in CONVENTIONS.md §4; serialized by obb.models.OrderBook.to_snapshot_dict (price levels truncated to the requested depth per side).",
+  "type": "object",
+  "required": [
+    "sym", "ven", "health", "tick", "bids", "asks", "tob", "msgs", "rebuilds"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "sym": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Canonical symbol."
+    },
+    "ven": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Venue id."
+    },
+    "health": {
+      "enum": ["HEALTHY", "STALE", "REBUILDING", "EMPTY"],
+      "description": "Book health state (obb.models.BookHealth)."
+    },
+    "tick": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "description": "Tick size for the instrument."
+    },
+    "bids": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/priceLevel" },
+      "description": "Bid side, best price first (descending price), truncated to the requested depth."
+    },
+    "asks": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/priceLevel" },
+      "description": "Ask side, best price first (ascending price), truncated to the requested depth."
+    },
+    "tob": {
+      "$ref": "#/$defs/topOfBook"
+    },
+    "msgs": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Total quote messages applied to this book since build."
+    },
+    "rebuilds": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of times this book was rebuilt from a snapshot."
+    }
+  },
+  "$defs": {
+    "priceLevel": {
+      "type": "array",
+      "prefixItems": [
+        { "type": "number", "minimum": 0, "description": "Price." },
+        { "type": "integer", "minimum": 0, "description": "Aggregated quantity (lots) at this price." }
+      ],
+      "maxItems": 2,
+      "minItems": 2
+    },
+    "topOfBook": {
+      "type": "object",
+      "required": [
+        "bb_px", "bb_qty", "ba_px", "ba_qty",
+        "mid", "spread", "spread_ticks", "imb", "ts"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "bb_px": { "type": "number", "minimum": 0, "description": "Best bid price (0 when the bid side is empty)." },
+        "bb_qty": { "type": "integer", "minimum": 0, "description": "Best bid quantity." },
+        "ba_px": { "type": "number", "minimum": 0, "description": "Best ask price (0 when the ask side is empty)." },
+        "ba_qty": { "type": "integer", "minimum": 0, "description": "Best ask quantity." },
+        "mid": { "type": "number", "minimum": 0, "description": "Mid price = (best bid + best ask) / 2 (0 when either side is empty)." },
+        "spread": { "type": "number", "minimum": 0, "description": "Best ask - best bid (0 when either side is empty)." },
+        "spread_ticks": { "type": "integer", "minimum": 0, "description": "Spread in ticks." },
+        "imb": {
+          "type": "number",
+          "description": "Top-level imbalance ratio = best bid qty / best ask qty (best-level quantities only), rounded to 6 decimals; 1.0 when either side is empty."
+        },
+        "ts": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Timestamp of this view, int64 ns since epoch."
+        }
+      }
+    }
+  }
+}

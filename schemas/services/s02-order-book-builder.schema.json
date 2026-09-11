@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hft-platform/schemas/services/s02-order-book-builder.schema.json",
+  "title": "S2 order-book-builder — API surface",
+  "description": "Port 7620, prefix OBB-. Endpoints (from router.py): GET /healthz, /readyz, /books, /book/{symbol}, /tob/{symbol}, /events, /stats; POST /rebuild/{symbol} (no body). /book/{symbol} returns a book snapshot (schemas/wire/book-snapshot-wire.schema.json); /tob/{symbol} returns the top-of-block object from that schema. GET /events streams chunked JSON-lines BookEvent objects.",
+  "type": "object",
+  "properties": {
+    "bookResponse": {
+      "description": "GET /book/{symbol} — one book snapshot (per venue, or a venue-keyed map when the symbol is listed at multiple venues).",
+      "anyOf": [
+        { "$ref": "../../wire/book-snapshot-wire.schema.json" },
+        {
+          "type": "object",
+          "additionalProperties": { "$ref": "../../wire/book-snapshot-wire.schema.json" }
+        }
+      ]
+    },
+    "topOfBookResponse": {
+      "description": "GET /tob/{symbol} — the top-of-block view for the book.",
+      "type": "object",
+      "required": ["bb_px", "bb_qty", "ba_px", "ba_qty", "mid", "spread", "spread_ticks", "imb", "ts"],
+      "additionalProperties": true,
+      "properties": {
+        "bb_px": { "type": "number" },
+        "bb_qty": { "type": "integer" },
+        "ba_px": { "type": "number" },
+        "ba_qty": { "type": "integer" },
+        "mid": { "type": "number" },
+        "spread": { "type": "number" },
+        "spread_ticks": { "type": "integer" },
+        "imb": { "type": "number" },
+        "ts": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "bookEvent": {
+      "description": "One element of the GET /events response (also the shape streamed to subscribers): a material change event. Keys use descriptive names (symbol/venue), not wire shorthand.",
+      "type": "object",
+      "required": ["kind", "symbol", "venue", "ts"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "enum": ["TOP_CHANGE", "SPREAD_CHANGE", "IMBALANCE", "DEPTH_DRAINED", "BOOK_STALE"] },
+        "symbol": { "type": "string", "description": "Canonical symbol." },
+        "venue": { "type": "string", "description": "Venue id." },
+        "detail": { "type": "string", "description": "Human-readable detail of the change." },
+        "ts": { "type": "integer", "minimum": 0, "description": "Event timestamp, int64 ns." }
+      }
+    }
+  }
+}

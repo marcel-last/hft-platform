@@ -1,0 +1,262 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hft-platform/schemas/services/s11-config-service.schema.json",
+  "title": "S11 config-service — API surface",
+  "description": "Port 7710, prefix CFG-. Centralized config store/distribution: GET /healthz, /readyz, /configs, /config/{service}, /versions, /changes, /changes/watch (long-poll), /overrides, /flags, /stats; PUT /config/{service}, /flags/{name}; POST /reload, /overrides; DELETE /overrides. Effective config = stored blob deep-merged with the env override at read time. Every upsert bumps the revision, recomputes the SHA-256 content hash over canonical JSON, and appends a sequenced change event. Errors: CFG-2xx (203 unknown service, 204 bad flag/override), CFG-404 no route, CFG-001 bad JSON (400).",
+  "type": "object",
+  "properties": {
+    "configUpsertRequest": {
+      "description": "PUT /config/{service} — upsert a service's config blob. The payload is the whole body minus the control fields, or the explicit 'payload' object when present.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "env": { "type": "string", "description": "Environment label for the blob; defaults to the config's default env." },
+        "updated_by": { "type": "string", "description": "Actor name for the change log." },
+        "note": { "type": "string", "description": "Free-form change note." },
+        "payload": { "type": "object", "description": "Explicit payload; wins over the flattened-body form." }
+      }
+    },
+    "configUpsertResponse": {
+      "description": "200 — created flag (true only for first registration) plus the stored blob.",
+      "type": "object",
+      "required": ["ts_ns", "created", "config"],
+      "additionalProperties": false,
+      "properties": {
+        "ts_ns": { "type": "integer", "minimum": 0 },
+        "created": { "type": "boolean" },
+        "config": { "$ref": "#/$defs/configBlob" }
+      }
+    },
+    "configGetResponse": {
+      "description": "GET /config/{service} — the effective config (blob deep-merged with the env override when ?env= names one that has an override). 404 CFG-203 for unknown services.",
+      "type": "object",
+      "required": ["ts_ns", "config"],
+      "additionalProperties": false,
+      "properties": {
+        "ts_ns": { "type": "integer", "minimum": 0 },
+        "config": { "$ref": "#/$defs/effectiveConfig" }
+      }
+    },
+    "configsListResponse": {
+      "description": "GET /configs — summary row per registered service.",
+      "type": "object",
+      "required": ["ts_ns", "count", "services"],
+      "additionalProperties": false,
+      "properties": {
+        "ts_ns": { "type": "integer", "minimum": 0 },
+        "count": { "type": "integer", "minimum": 0 },
+        "services": { "type": "array", "items": { "$ref": "#/$defs/serviceInfo" } }
+      }
+    },
+    "versionsResponse": {
+      "description": "GET /versions[?service=] — per-service version table (revision + hash + history).",
+      "type": "object",
+      "required": ["ts_ns"],
+      "additionalProperties": true,
+      "properties": {
+        "ts_ns": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "changesResponse": {
+      "description": "GET /changes?since=&limit= — the sequenced change log (config_update / override_set / override_clear / flag_change).",
+      "type": "object",
+      "required": ["ts_ns", "count", "events"],
+      "additionalProperties": false,
+      "properties": {
+        "ts_ns": { "type": "integer", "minimum": 0 },
+        "count": { "type": "integer", "minimum": 0 },
+        "events": { "type": "array", "items": { "$ref": "#/$defs/changeEvent" } }
+      }
+    },
+    "changesWatchResponse": {
+      "description": "GET /changes/watch?since=&timeout_ms=&service= — long-poll: holds the connection until a new event (seq > since, scoped to service when given) or the (bounded) timeout. Response is the wait result object spread at top level (changed/woken, seq, ...).",
+      "type": "object",
+      "required": ["ts_ns"],
+      "additionalProperties": true,
+      "properties": {
+        "ts_ns": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "overrideSetRequest": {
+      "description": "POST /overrides — set an environment override deep-merged over the stored blob at read time (the stored blob is never mutated).",
+      "type": "object",
+      "required": ["service", "override"],
+      "additionalProperties": false,
+      "properties": {
+        "service": { "type": "string", "minLength": 1 },
+        "env": { "type": "string", "description": "Environment label; defaults to the store's default env." },
+        "override": { "type": "object", "description": "Partial config to deep-merge (arbitrary nesting)." },
+        "updated_by": { "type": "string" },
+        "note": { "type": "string" }
+      }
+    },
+    "overrideSetResponse": {
+      "description": "200 — the set-override result object spread at top level (service, env, found/created, keys touched, ...).",
+      "type": "object",
+      "required": ["ts_ns"],
+      "additionalProperties": true,
+      "properties": {
+        "ts_ns": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "overrideClearRequest": {
+      "description": "DELETE /overrides — body {service, env?}; env absent clears all environments for the service.",
+      "type": "object",
+      "required": ["service"],
+      "additionalProperties": false,
+      "properties": {
+        "service": { "type": "string", "minLength": 1 },
+        "env": { "type": "string" },
+        "updated_by": { "type": "string" },
+        "note": { "type": "string" }
+      }
+    },
+    "overrideClearResponse": {
+      "description": "200 — {ts_ns, found, ...}: found is false when no override existed (still 200, idempotent).",
+      "type": "object",
+      "required": ["ts_ns", "found"],
+      "additionalProperties": true,
+      "properties": {
+        "ts_ns": { "type": "integer", "minimum": 0 },
+        "found": { "type": "boolean" }
+      }
+    },
+    "overrideListResponse": {
+      "description": "GET /overrides[?service=] — all overrides grouped per service/env.",
+      "type": "object",
+      "required": ["ts_ns"],
+      "additionalProperties": true,
+      "properties": {
+        "ts_ns": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "flagListResponse": {
+      "description": "GET /flags — all feature flags with their bounded change history.",
+      "type": "object",
+      "required": ["ts_ns", "count", "flags"],
+      "additionalProperties": false,
+      "properties": {
+        "ts_ns": { "type": "integer", "minimum": 0 },
+        "count": { "type": "integer", "minimum": 0 },
+        "flags": { "type": "array", "items": { "$ref": "#/$defs/flagState" } }
+      }
+    },
+    "flagSetRequest": {
+      "description": "PUT /flags/{name} — set a flag value (typed: bool/number/string).",
+      "type": "object",
+      "required": ["value"],
+      "additionalProperties": false,
+      "properties": {
+        "value": { "description": "New flag value." },
+        "description": { "type": "string" },
+        "updated_by": { "type": "string" },
+        "note": { "type": "string" }
+      }
+    },
+    "flagSetResponse": {
+      "description": "200 — the updated flag row.",
+      "type": "object",
+      "required": ["ts_ns", "flag"],
+      "additionalProperties": false,
+      "properties": {
+        "ts_ns": { "type": "integer", "minimum": 0 },
+        "flag": { "$ref": "#/$defs/flagState" }
+      }
+    },
+    "reloadResponse": {
+      "description": "POST /reload — no-op refresh broadcast; returns the current version table.",
+      "type": "object",
+      "required": ["ts_ns", "reloaded", "versions"],
+      "additionalProperties": false,
+      "properties": {
+        "ts_ns": { "type": "integer", "minimum": 0 },
+        "reloaded": { "const": true },
+        "versions": { "type": "object" }
+      }
+    },
+    "statsResponse": {
+      "description": "GET /stats — the store's stats view nested under 'store'.",
+      "type": "object",
+      "required": ["store"],
+      "additionalProperties": false,
+      "properties": {
+        "store": { "type": "object" }
+      }
+    }
+  },
+  "$defs": {
+    "configBlob": {
+      "description": "A stored, versioned config blob (cfgs.models.ConfigBlob.to_dict).",
+      "type": "object",
+      "required": ["service", "payload", "revision", "hash", "env", "updated_ns", "updated_by", "note"],
+      "additionalProperties": false,
+      "properties": {
+        "service": { "type": "string", "minLength": 1 },
+        "payload": { "type": "object", "description": "Arbitrary per-service config document." },
+        "revision": { "type": "integer", "minimum": 1, "description": "Monotonic per-service revision, bumped on every upsert." },
+        "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "SHA-256 over canonical (key-sorted) JSON of the payload." },
+        "env": { "type": "string" },
+        "updated_ns": { "type": "integer", "minimum": 0 },
+        "updated_by": { "type": "string" },
+        "note": { "type": "string" }
+      }
+    },
+    "effectiveConfig": {
+      "description": "GET-time view: the blob possibly deep-merged with an env override, plus both the merged hash and the unmerged base_hash, and an override_applied flag.",
+      "allOf": [
+        { "$ref": "#/$defs/configBlob" },
+        {
+          "type": "object",
+          "properties": {
+            "base_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Hash of the unmerged stored blob (equals hash when no override applied)." },
+            "override_applied": { "type": "boolean" }
+          }
+        }
+      ]
+    },
+    "serviceInfo": {
+      "description": "GET /configs summary row (cfgs.models.ServiceInfo.to_dict).",
+      "type": "object",
+      "required": ["service", "revision", "hash", "env", "updated_ns", "updated_by", "has_overrides"],
+      "additionalProperties": false,
+      "properties": {
+        "service": { "type": "string" },
+        "revision": { "type": "integer", "minimum": 0 },
+        "hash": { "type": "string" },
+        "env": { "type": "string" },
+        "updated_ns": { "type": "integer", "minimum": 0 },
+        "updated_by": { "type": "string" },
+        "has_overrides": { "type": "boolean" }
+      }
+    },
+    "changeEvent": {
+      "description": "One sequenced change-log entry (cfgs.models.ChangeEvent.to_dict).",
+      "type": "object",
+      "required": ["seq", "kind", "service", "ts_ns", "revision", "actor", "note"],
+      "additionalProperties": false,
+      "properties": {
+        "seq": { "type": "integer", "minimum": 1, "description": "Platform-wide monotonic sequence (long-poll offset)." },
+        "kind": { "enum": ["config_update", "override_set", "override_clear", "flag_change"] },
+        "service": { "type": "string" },
+        "ts_ns": { "type": "integer", "minimum": 0 },
+        "revision": { "type": "integer", "minimum": 0 },
+        "actor": { "type": "string" },
+        "note": { "type": "string" }
+      }
+    },
+    "flagState": {
+      "description": "One feature flag (cfgs.models.FlagState.to_dict) with bounded history.",
+      "type": "object",
+      "required": ["name", "value", "description", "updated_ns", "updated_by"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "value": { "description": "Typed flag value." },
+        "description": { "type": "string" },
+        "updated_ns": { "type": "integer", "minimum": 0 },
+        "updated_by": { "type": "string" },
+        "history": { "type": "array", "items": { "type": "object" }, "description": "Bounded most-recent change entries." }
+      }
+    }
+  }
+}

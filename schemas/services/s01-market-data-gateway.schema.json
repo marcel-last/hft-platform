@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hft-platform/schemas/services/s01-market-data-gateway.schema.json",
+  "title": "S1 market-data-gateway — API surface",
+  "description": "Port 7610, prefix MDG-. Endpoints (from router.py): GET /healthz, /readyz, /feeds, /symbols, /quotes/{symbol}?limit, /history/{symbol}?limit, /quality; POST /resync (no body); GET /subscribers. All responses use the §1.2 error envelope on failure. Quotes in responses are quote-wire objects (schemas/wire/quote-wire.schema.json).",
+  "type": "object",
+  "properties": {
+    "resyncRequest": {
+      "description": "POST /resync — no body required; forces a full resync pass for the named venue (optional).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "venue": { "type": "string", "description": "Optional venue id; absent = all venues." }
+      }
+    },
+    "quotesResponse": {
+      "type": "object",
+      "required": ["symbol", "count", "quotes"],
+      "additionalProperties": true,
+      "properties": {
+        "symbol": { "type": "string" },
+        "count": { "type": "integer", "minimum": 0 },
+        "quotes": { "type": "array", "items": { "$ref": "../../wire/quote-wire.schema.json" } }
+      }
+    },
+    "symbolsResponse": {
+      "type": "object",
+      "required": ["count", "symbols"],
+      "additionalProperties": true,
+      "properties": {
+        "count": { "type": "integer", "minimum": 0 },
+        "symbols": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["canonical_symbol"],
+            "additionalProperties": true,
+            "properties": {
+              "canonical_symbol": { "type": "string" },
+              "tick_size": { "type": ["number", "null"] },
+              "price_decimals": { "type": ["integer", "null"] },
+              "qty_decimals": { "type": ["integer", "null"] },
+              "venues": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        }
+      }
+    }
+  }
+}

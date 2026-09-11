@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hft-platform/schemas/trade-wire.schema.json",
+  "title": "Canonical trade print wire format",
+  "description": "Executed-trade print as distributed by market-data-gateway (S1). Defined in CONVENTIONS.md §4 (trade print table); serialized by mdg.models.trade_to_wire. Note: the implementation adds venue sequencing (seq), execution id (xid), tick size, and quality tag on top of the §4 table; the aggressor side is carried in 'aggr'.",
+  "type": "object",
+  "required": [
+    "v", "sym", "ven", "seq", "px", "qty", "aggr", "xid",
+    "tick", "q", "vt", "rt", "nl"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "v": { "const": 1, "description": "Wire format version." },
+    "sym": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Canonical symbol."
+    },
+    "ven": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Venue id."
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Venue sequence number."
+    },
+    "px": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Execution price."
+    },
+    "qty": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Executed quantity (lots)."
+    },
+    "aggr": {
+      "enum": ["BID", "ASK"],
+      "description": "Aggressor side of the trade."
+    },
+    "xid": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Venue execution identifier."
+    },
+    "tick": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "description": "Tick size for the instrument."
+    },
+    "q": {
+      "enum": ["FRESH", "STALE_WARN", "STALE", "GAP_SUSPECT", "OUT_OF_ORDER"],
+      "description": "Data-quality tag."
+    },
+    "vt": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Venue timestamp, int64 ns since epoch."
+    },
+    "rt": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Receive timestamp at the gateway, int64 ns since epoch."
+    },
+    "nl": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Gateway normalization latency (rt - vt), int64 ns."
+    }
+  }
+}

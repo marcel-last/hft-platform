@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hft-platform/schemas/services/s08-data-quality-monitor.schema.json",
+  "title": "S8 data-quality-monitor — API surface",
+  "description": "Port 7680, prefix DQM-. Read-only dashboard: GET /healthz, /readyz, /quality-summary, /quality/{symbol}, /gaps, /staleness, /degradations, /stats. No mutating endpoints. Aggregates S1 /quality + S2 /books on an interval; a pass is a no-op when BOTH upstreams return no data (outage => state preserved). Composite score is integer [0,100] with hysteresis.",
+  "type": "object",
+  "properties": {
+    "qualitySummaryResponse": {
+      "description": "GET /quality-summary — full dashboard: engine counters, per-state symbol counts, and per-symbol rows (dqm.models.SymbolQuality.to_dict).",
+      "type": "object",
+      "required": ["ts_ns", "symbols_total", "counts", "degraded_symbols", "symbols", "engine"],
+      "additionalProperties": false,
+      "properties": {
+        "ts_ns": { "type": "integer", "minimum": 0 },
+        "symbols_total": { "type": "integer", "minimum": 0 },
+        "counts": {
+          "type": "object",
+          "required": ["OK", "DEGRADED", "UNKNOWN"],
+          "additionalProperties": false,
+          "properties": {
+            "OK": { "type": "integer", "minimum": 0 },
+            "DEGRADED": { "type": "integer", "minimum": 0 },
+            "UNKNOWN": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "degraded_symbols": { "type": "array", "items": { "type": "string" } },
+        "symbols": { "type": "array", "items": { "$ref": "#/$defs/symbolQuality" } },
+        "engine": { "type": "object", "description": "Engine counters (passes_completed, last_pass_ns, upstream_failures, etc.)." }
+      }
+    },
+    "gapRecord": {
+      "description": "One element of GET /gaps (dqm.models.GapRecord.to_dict): a FEED_SILENCE or SEQUENCE_GAP observation.",
+      "type": "object",
+      "required": ["symbol", "kind", "detail", "magnitude_ms", "ts_ns"],
+      "additionalProperties": false,
+      "properties": {
+        "symbol": { "type": "string" },
+        "kind": { "enum": ["FEED_SILENCE", "SEQUENCE_GAP"] },
+        "detail": { "type": "string" },
+        "magnitude_ms": { "type": "number" },
+        "ts_ns": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "stalenessSample": {
+      "description": "One element of GET /staleness (dqm.models.StalenessSample.to_dict).",
+      "type": "object",
+      "required": ["symbol", "max_staleness_ms", "silent_ms", "stale_pct", "ts_ns"],
+      "additionalProperties": false,
+      "properties": {
+        "symbol": { "type": "string" },
+        "max_staleness_ms": { "type": "number" },
+        "silent_ms": { "type": "number" },
+        "stale_pct": { "type": "number", "minimum": 0, "maximum": 100 },
+        "ts_ns": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "degradationEvent": {
+      "description": "One element of GET /degradations (dqm.models.DegradationEvent.to_dict): a DEGRADED or RECOVERED episode (bounded history).",
+      "type": "object",
+      "required": ["id", "symbol", "kind", "severity", "score", "reasons", "ts_ns"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "symbol": { "type": "string" },
+        "kind": { "enum": ["DEGRADED", "RECOVERED"] },
+        "severity": { "enum": ["MINOR", "MAJOR", "CRITICAL"] },
+        "score": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "reasons": { "type": "array", "items": { "type": "string" } },
+        "ts_ns": { "type": "integer", "minimum": 0 }
+      }
+    }
+  },
+  "$defs": {
+    "symbolQuality": {
+      "description": "Per-symbol quality row (dqm.models.SymbolQuality.to_dict).",
+      "type": "object",
+      "required": ["symbol", "state", "score", "feed_silent", "book_stale_venues", "book_cross_events", "book_health_by_venue", "stale_pct", "gap_events", "out_of_order_events", "max_staleness_ms_observed", "silent_ms", "quotes_seen", "reasons", "last_updated_ns"],
+      "additionalProperties": false,
+      "properties": {
+        "symbol": { "type": "string" },
+        "state": { "enum": ["OK", "DEGRADED", "UNKNOWN"], "description": "UNKNOWN = no observations yet." },
+        "score": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "feed_silent": { "type": "boolean" },
+        "book_stale_venues": { "type": "array", "items": { "type": "string" } },
+        "book_cross_events": { "type": "integer", "minimum": 0 },
+        "book_health_by_venue": { "type": "object", "additionalProperties": { "type": "string" } },
+        "stale_pct": { "type": "number", "minimum": 0, "maximum": 100 },
+        "gap_events": { "type": "integer", "minimum": 0 },
+        "out_of_order_events": { "type": "integer", "minimum": 0 },
+        "max_staleness_ms_observed": { "type": "number" },
+        "silent_ms": { "type": "number" },
+        "quotes_seen": { "type": "integer", "minimum": 0 },
+        "reasons": { "type": "array", "items": { "type": "string" } },
+        "last_updated_ns": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

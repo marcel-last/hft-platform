@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hft-platform/schemas/services/s06-position-keeper.schema.json",
+  "title": "S6 position-keeper — API surface",
+  "description": "Port 7660, prefix POS-. Endpoints (from router): GET /healthz, /readyz, /positions, /positions/{symbol}, /positions/snapshot, /history/{symbol}, /stats; POST /adjust; POST /corporate-action. Positions are keyed by (account, symbol). Fills are ingested exactly-once (idempotency set) from S4 /fills.",
+  "type": "object",
+  "properties": {
+    "adjustRequest": {
+      "description": "POST /adjust — a manual operator correction. AdjustmentRecord.from_dict. Required: symbol, delta_qty (non-zero). account defaults to the configured default_account. new_avg_price is optional (>= 0) for cost-basis rebases.",
+      "type": "object",
+      "required": ["symbol", "delta_qty"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "description": "Optional; absent => ADJ-<now_ns>." },
+        "account": { "type": "string", "description": "Owning account; absent => default account." },
+        "symbol": { "type": "string", "minLength": 1, "description": "Canonical symbol (alias: sym)." },
+        "delta_qty": { "type": "integer", "description": "Signed quantity change; must be non-zero." },
+        "reason": { "type": "string", "description": "Free-text operator reason." },
+        "new_avg_price": { "type": ["number", "null"], "minimum": 0, "description": "Optional cost-basis rebase; absent => keep existing average." },
+        "ts_ns": { "type": "integer", "minimum": 0, "description": "Optional override; absent => server-stamped." }
+      }
+    },
+    "corporateActionRequest": {
+      "description": "POST /corporate-action — a corporate action reshaping every non-flat position of a symbol. CorporateAction.from_dict. Required: type (SPLIT|DIVIDEND), symbol. SPLIT requires factor > 0; DIVIDEND requires per_share >= 0.",
+      "type": "object",
+      "required": ["type", "symbol"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "enum": ["SPLIT", "DIVIDEND"] },
+        "symbol": { "type": "string", "minLength": 1, "description": "Canonical symbol (alias: sym)." },
+        "factor": { "type": "number", "description": "SPLIT only; must be > 0. Default 1.0." },
+        "per_share": { "type": "number", "description": "DIVIDEND only; cash per lot, >= 0. Default 0.0." },
+        "ts_ns": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "position": {
+      "description": "A PositionState row (to_dict with ref_price). Appears in /positions, /positions/{symbol}, /positions/snapshot.",
+      "type": "object",
+      "required": ["account", "symbol", "net_qty", "avg_price", "gross_notional", "realized_pnl"],
+      "additionalProperties": true,
+      "properties": {
+        "account": { "type": "string" },
+        "symbol": { "type": "string" },
+        "net_qty": { "type": "integer", "description": "Signed net position (positive long, negative short)." },
+        "avg_price": { "type": "number" },
+        "gross_notional": { "type": "number" },
+        "realized_pnl": { "type": "number" },
+        "unrealized_pnl": { "type": ["number", "null"], "description": "Present when a ref price is known." },
+        "ref_px": { "type": ["number", "null"] },
+        "updated_ns": { "type": "integer" }
+      }
+    }
+  }
+}

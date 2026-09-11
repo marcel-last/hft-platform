@@ -1,0 +1,258 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hft-platform/schemas/services/s14-settlement-service.schema.json",
+  "title": "S14 settlement-service — API surface",
+  "description": "Port 7740, prefix STL-. Idempotent per-settlement-date settlement runs: GET /healthz, /readyz, /reports/{date}, /runs/{date}, /discrepancies, /stats; POST /settle, /finalize/{date}, /ingest. Fill idempotency is per-run (byte-identical replay folds; same id with a new payload is STL-205). Statement lines replace per venue. Discrepancies are recomputed on every read (never stored). finalize seals the run with a SHA-256 content hash (idempotent; sealed runs reject mutation, STL-206). S6 position ingest derives deterministic synthetic fills. Errors: STL-001 bad JSON (400), STL-002 S6 pull failure (503 retryable), STL-201 bad settle field (400), STL-202 bad date (400), STL-203 bad limit (400), STL-204 unknown run (404), STL-205 fill-id conflict (409), STL-206 settle on finalized (409), STL-404/405 routing.",
+  "type": "object",
+  "properties": {
+    "settleRequest": {
+      "description": "POST /settle — settle fills and/or venue statement lines for a date. Fills are upper-cased/normalized; statement lines auto-id as STM-<VENUE>-<seq> when absent. A per-venue statement block REPLACES that venue's previous lines.",
+      "type": "object",
+      "required": ["date"],
+      "additionalProperties": false,
+      "properties": {
+        "date": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$", "description": "Settlement date (ISO-8601); must be >= 1970 and not in the future (STL-202)." },
+        "fills": { "type": "array", "items": { "$ref": "#/$defs/fillRecord" } },
+        "statement_lines": { "type": "array", "items": { "$ref": "#/$defs/statementLine" } }
+      }
+    },
+    "settleResponse": {
+      "description": "200 — per-call accounting plus the run summary.",
+      "type": "object",
+      "required": ["date", "run_kind", "finalized", "fills_added", "duplicate_fills_ignored", "statement_venues_replaced", "run"],
+      "additionalProperties": false,
+      "properties": {
+        "date": { "type": "string" },
+        "run_kind": { "enum": ["intraday", "eod"] },
+        "finalized": { "type": "boolean" },
+        "fills_added": { "type": "integer", "minimum": 0 },
+        "duplicate_fills_ignored": { "type": "integer", "minimum": 0 },
+        "statement_venues_replaced": { "type": "array", "items": { "type": "string" } },
+        "run": { "$ref": "#/$defs/runSummary" }
+      }
+    },
+    "finalizeResponse": {
+      "description": "POST /finalize/{date} — seal the run. Idempotent: re-finalizing returns the same content_hash with idempotent:true.",
+      "type": "object",
+      "required": ["date", "finalized", "idempotent", "content_hash", "run"],
+      "additionalProperties": false,
+      "properties": {
+        "date": { "type": "string" },
+        "finalized": { "const": true },
+        "idempotent": { "type": "boolean", "description": "true when the run was already sealed (re-finalize)." },
+        "content_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "SHA-256 over the canonical run snapshot (stable while sealed)." },
+        "run": { "$ref": "#/$defs/runSummary" }
+      }
+    },
+    "reportResponse": {
+      "description": "GET /reports/{date} — full report: run summary, netting, cash roll-up, lazily recomputed discrepancies, revision history, and the live verify_hash (equals the seal digest when finalized, null before).",
+      "type": "object",
+      "required": ["run", "net_positions", "cash_summary", "discrepancies", "discrepancy_count", "revisions", "verify_hash"],
+      "additionalProperties": false,
+      "properties": {
+        "run": { "$ref": "#/$defs/runSummary" },
+        "net_positions": { "type": "array", "items": { "$ref": "#/$defs/netPosition" } },
+        "cash_summary": { "$ref": "#/$defs/cashSummary" },
+        "discrepancies": { "type": "array", "items": { "$ref": "#/$defs/discrepancy" } },
+        "discrepancy_count": { "type": "integer", "minimum": 0 },
+        "revisions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["seq", "ts_ns", "action", "fills_added", "fills_duplicated", "statement_venues", "run_kind"],
+            "additionalProperties": false,
+            "properties": {
+              "seq": { "type": "integer", "minimum": 1, "description": "Per-date lifetime monotonic revision sequence." },
+              "ts_ns": { "type": "integer", "minimum": 0 },
+              "action": { "enum": ["settle", "finalize"] },
+              "fills_added": { "type": "integer", "minimum": 0 },
+              "fills_duplicated": { "type": "integer", "minimum": 0 },
+              "statement_venues": { "type": "array", "items": { "type": "string" } },
+              "run_kind": { "enum": ["intraday", "eod"] }
+            }
+          }
+        },
+        "verify_hash": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$", "description": "null until finalized; stable while sealed." }
+      }
+    },
+    "runStatusResponse": {
+      "description": "GET /runs/{date} — the slim run summary; 404 STL-204 when the date has no run.",
+      "type": "object",
+      "required": ["date", "kind", "finalized", "created_ns", "updated_ns", "settle_calls", "duplicate_fills_ignored", "fill_count", "statement_line_count", "content_hash"],
+      "additionalProperties": false,
+      "properties": {
+        "date": { "type": "string" },
+        "kind": { "enum": ["intraday", "eod"] },
+        "finalized": { "type": "boolean" },
+        "created_ns": { "type": "integer", "minimum": 0 },
+        "updated_ns": { "type": "integer", "minimum": 0 },
+        "settle_calls": { "type": "integer", "minimum": 0 },
+        "duplicate_fills_ignored": { "type": "integer", "minimum": 0 },
+        "fill_count": { "type": "integer", "minimum": 0 },
+        "statement_line_count": { "type": "integer", "minimum": 0 },
+        "content_hash": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "discrepanciesResponse": {
+      "description": "GET /discrepancies?date=&venue=&kind=&limit= — findings newest-date-first; venue/kind filters are case-insensitive; truncated is true when the limit bound the result.",
+      "type": "object",
+      "required": ["discrepancies", "count", "truncated"],
+      "additionalProperties": false,
+      "properties": {
+        "discrepancies": { "type": "array", "items": { "$ref": "#/$defs/discrepancy" } },
+        "count": { "type": "integer", "minimum": 0 },
+        "truncated": { "type": "boolean" }
+      }
+    },
+    "ingestResponse": {
+      "description": "POST /ingest — manual S6 pull + settle. 503 STL-002 (retryable) when the S6 pull fails; 200 with the settle response on success.",
+      "type": "object",
+      "required": ["ingested"],
+      "additionalProperties": true,
+      "properties": {
+        "ingested": { "type": "boolean" }
+      }
+    },
+    "statsResponse": {
+      "description": "GET /stats — lifetime counters, per-date run summaries (most recent kept), and ingest counters (pull_successes/pull_failures/consecutive_failures).",
+      "type": "object",
+      "required": ["run_count", "settle_calls", "fill_id_conflicts", "duplicate_fills_ignored", "finalized_runs", "ingest"],
+      "additionalProperties": true,
+      "properties": {
+        "run_count": { "type": "integer", "minimum": 0, "description": "True total of settlement runs, even when the listed window is bounded." },
+        "settle_calls": { "type": "integer", "minimum": 0 },
+        "fill_id_conflicts": { "type": "integer", "minimum": 0 },
+        "duplicate_fills_ignored": { "type": "integer", "minimum": 0 },
+        "finalized_runs": { "type": "integer", "minimum": 0 },
+        "dates": { "type": "array", "items": { "type": "string" }, "description": "Most recent settlement dates (bounded)." },
+        "runs": { "type": "array", "items": { "$ref": "#/$defs/runSummary" } },
+        "ingest": {
+          "type": "object",
+          "required": ["pull_successes", "pull_failures", "consecutive_failures"],
+          "additionalProperties": true,
+          "properties": {
+            "pull_successes": { "type": "integer", "minimum": 0 },
+            "pull_failures": { "type": "integer", "minimum": 0 },
+            "consecutive_failures": { "type": "integer", "minimum": 0, "description": "Resets on a successful pull; drives readyz." }
+          }
+        }
+      }
+    },
+    "readyz": {
+      "description": "GET /readyz — not_ready with 'position-keeper consecutive pull failures: N' while the S6 ingest streak is nonzero.",
+      "type": "object",
+      "required": ["status", "reasons"],
+      "additionalProperties": true,
+      "properties": {
+        "status": { "enum": ["ready", "not_ready"] },
+        "reasons": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  },
+  "$defs": {
+    "fillRecord": {
+      "description": "One fill on the settle wire (stls.models.FillRecord; parse_fill guards each field, STL-201).",
+      "type": "object",
+      "required": ["fill_id", "ts_ns", "venue", "symbol", "side", "px", "qty", "fee", "account"],
+      "additionalProperties": false,
+      "properties": {
+        "fill_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "ts_ns": { "type": "integer", "minimum": 0 },
+        "venue": { "type": "string", "minLength": 1 },
+        "symbol": { "type": "string", "minLength": 1 },
+        "side": { "enum": ["BUY", "SELL"] },
+        "px": { "type": "number", "exclusiveMinimum": 0 },
+        "qty": { "type": "integer", "exclusiveMinimum": 0 },
+        "fee": { "type": "number", "minimum": 0 },
+        "account": { "type": "string", "minLength": 1 }
+      }
+    },
+    "statementLine": {
+      "description": "One venue statement line (stls.models.StatementLine); stmt_line_id auto-fills STM-<VENUE>-<seq> when absent; ts_ns may be null for legacy statements.",
+      "type": "object",
+      "required": ["venue", "symbol", "side", "qty", "px", "fee"],
+      "additionalProperties": false,
+      "properties": {
+        "stmt_line_id": { "type": ["string", "null"] },
+        "ts_ns": { "type": ["integer", "null"], "minimum": 0 },
+        "venue": { "type": "string", "minLength": 1 },
+        "symbol": { "type": "string", "minLength": 1 },
+        "side": { "enum": ["BUY", "SELL"], "description": "Venue's perspective of our fill." },
+        "qty": { "type": "integer", "exclusiveMinimum": 0 },
+        "px": { "type": "number", "exclusiveMinimum": 0 },
+        "fee": { "type": "number", "minimum": 0 }
+      }
+    },
+    "runSummary": {
+      "description": "stls.settlement_engine._run_summary — the slim per-run view embedded in settle/finalize/report responses and /runs/{date}.",
+      "type": "object",
+      "required": ["date", "kind", "finalized", "created_ns", "updated_ns", "settle_calls", "duplicate_fills_ignored", "fill_count", "statement_line_count", "content_hash"],
+      "additionalProperties": false,
+      "properties": {
+        "date": { "type": "string" },
+        "kind": { "enum": ["intraday", "eod"] },
+        "finalized": { "type": "boolean" },
+        "created_ns": { "type": "integer", "minimum": 0 },
+        "updated_ns": { "type": "integer", "minimum": 0 },
+        "settle_calls": { "type": "integer", "minimum": 0 },
+        "duplicate_fills_ignored": { "type": "integer", "minimum": 0 },
+        "fill_count": { "type": "integer", "minimum": 0 },
+        "statement_line_count": { "type": "integer", "minimum": 0 },
+        "content_hash": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "netPosition": {
+      "description": "Per (account, symbol) netted row (stls.netting.NetPosition.to_dict); flat rows are dropped when zero_out_flat_positions is on.",
+      "type": "object",
+      "required": ["account", "symbol", "buy_qty", "sell_qty", "net_qty", "buy_notional", "sell_notional", "net_cash_flow", "fees", "fill_count", "avg_fill_px"],
+      "additionalProperties": false,
+      "properties": {
+        "account": { "type": "string" },
+        "symbol": { "type": "string" },
+        "buy_qty": { "type": "integer", "minimum": 0 },
+        "sell_qty": { "type": "integer", "minimum": 0 },
+        "net_qty": { "type": "integer" },
+        "buy_notional": { "type": "number" },
+        "sell_notional": { "type": "number" },
+        "net_cash_flow": { "type": "number", "description": "sell_notional - buy_notional (fees excluded)." },
+        "fees": { "type": "number" },
+        "fill_count": { "type": "integer", "minimum": 0 },
+        "avg_fill_px": { "type": "number", "description": "Weighted average price over the day's turnover." }
+      }
+    },
+    "cashSummary": {
+      "description": "Day-level cash aggregation (stls.netting.CashSummary.to_dict).",
+      "type": "object",
+      "required": ["buy_notional", "sell_notional", "total_fees", "net_cash", "fill_count"],
+      "additionalProperties": false,
+      "properties": {
+        "buy_notional": { "type": "number" },
+        "sell_notional": { "type": "number" },
+        "total_fees": { "type": "number" },
+        "net_cash": { "type": "number", "description": "sell_notional - buy_notional - total_fees." },
+        "fill_count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "discrepancy": {
+      "description": "One reconciliation finding (stls.models.Discrepancy.to_dict). QTY_MISMATCH/MISSING_STATEMENT are CRITICAL; PRICE_MISMATCH/UNEXPECTED_SYMBOL are WARNING. detected_ns is re-stamped on every read.",
+      "type": "object",
+      "required": ["kind", "severity", "date", "venue", "symbol", "our_qty", "stmt_qty", "qty_delta", "our_notional", "stmt_notional", "our_avg_px", "stmt_avg_px", "detected_ns"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "enum": ["QTY_MISMATCH", "PRICE_MISMATCH", "MISSING_STATEMENT", "UNEXPECTED_SYMBOL"] },
+        "severity": { "enum": ["CRITICAL", "WARNING"] },
+        "date": { "type": "string" },
+        "venue": { "type": "string" },
+        "symbol": { "type": "string" },
+        "our_qty": { "type": "integer" },
+        "stmt_qty": { "type": "integer" },
+        "qty_delta": { "type": "integer" },
+        "our_notional": { "type": "number" },
+        "stmt_notional": { "type": "number" },
+        "our_avg_px": { "type": ["number", "null"] },
+        "stmt_avg_px": { "type": ["number", "null"] },
+        "detected_ns": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

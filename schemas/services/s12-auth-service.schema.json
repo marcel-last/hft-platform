@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hft-platform/schemas/services/s12-auth-service.schema.json",
+  "title": "S12 auth-service — API surface",
+  "description": "Port 7720, prefix AUT-. JWT (HS256) issue/verify/revoke + JWKS-style public key view. Endpoints: GET /healthz, /readyz, /keys, /stats; POST /token, /verify, /revoke. Tokens are compact JWTs signed with the in-crate HMAC-SHA256; the signing secret never leaves the service (only kid/alg/fingerprint are exposed). Revoke is idempotent by jti over a bounded set; key rotation retires the oldest active key but retained tokens keep verifying until evicted. Errors: AUT-2xx request/validation (400): 204 malformed token, 205 wrong alg, 206 unknown kid, 207 bad signature, 208 expired, 209 not-yet-valid, 210 revoked, 211 required scope missing, 212 semantic mismatch, 213/214 missing jti/token, 201/202/203 bad sub/scopes/ttl; AUT-0xx protocol/no-route (404/405).",
+  "type": "object",
+  "properties": {
+    "tokenIssueRequest": {
+      "description": "POST /token — mint a token. 'sub' is required and non-empty; 'scopes' defaults to []; 'ttl_ns' is clamped to max_ttl_ns.",
+      "type": "object",
+      "required": ["sub"],
+      "additionalProperties": false,
+      "properties": {
+        "sub": { "type": "string", "minLength": 1, "description": "Subject (identity) the token is issued for." },
+        "scopes": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "Optional; absent/null -> empty list." },
+        "ttl_ns": { "type": "integer", "exclusiveMinimum": 0, "description": "Optional token lifetime; clamped to the configured max." }
+      }
+    },
+    "tokenIssueResponse": {
+      "description": "200 — the issued token plus its metadata (IssuedToken.to_json). iat == nbf; exp == iat + effective ttl.",
+      "type": "object",
+      "required": ["token", "kid", "jti", "sub", "scope", "iat", "nbf", "exp"],
+      "additionalProperties": false,
+      "properties": {
+        "token": { "type": "string", "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$", "description": "Compact JWT (three base64url segments)." },
+        "kid": { "type": "string", "description": "Signing key id used; present in the token header." },
+        "jti": { "type": "string", "description": "Unique token id (revocation handle)." },
+        "sub": { "type": "string" },
+        "scope": { "type": "array", "items": { "type": "string" } },
+        "iat": { "type": "integer", "minimum": 0 },
+        "nbf": { "type": "integer", "minimum": 0 },
+        "exp": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "tokenVerifyRequest": {
+      "description": "POST /verify — verify a token; optional 'scope' triggers a required-scope check (AUT-211 on failure).",
+      "type": "object",
+      "required": ["token"],
+      "additionalProperties": false,
+      "properties": {
+        "token": { "type": "string", "minLength": 1 },
+        "scope": { "type": "string", "description": "Optional required scope to assert on the token's scope list." }
+      }
+    },
+    "tokenVerifyResponse": {
+      "description": "200 — FLAT claims object (no nested 'claims' wrapper) with kid and valid:true. On any verification failure the service answers the §1.2 error envelope with the specific AUT-2xx code and context.reason set to the VerifyFailure string.",
+      "type": "object",
+      "required": ["iss", "sub", "jti", "iat", "nbf", "exp", "scope", "kid", "valid"],
+      "additionalProperties": false,
+      "properties": {
+        "iss": { "type": "string" },
+        "sub": { "type": "string" },
+        "aud": { "type": "string", "description": "Present only when the token carried an audience." },
+        "jti": { "type": "string" },
+        "iat": { "type": "integer", "minimum": 0 },
+        "nbf": { "type": "integer", "minimum": 0 },
+        "exp": { "type": "integer", "minimum": 0 },
+        "scope": { "type": "array", "items": { "type": "string" } },
+        "kid": { "type": "string" },
+        "valid": { "const": true }
+      }
+    },
+    "tokenRevokeRequest": {
+      "description": "POST /revoke — revoke a jti; idempotent (re-revoking returns created:false and is not double-counted).",
+      "type": "object",
+      "required": ["jti"],
+      "additionalProperties": false,
+      "properties": {
+        "jti": { "type": "string", "minLength": 1 }
+      }
+    },
+    "tokenRevokeResponse": {
+      "description": "200 — revoked:true always; created distinguishes first-time from already-present.",
+      "type": "object",
+      "required": ["revoked", "jti", "created"],
+      "additionalProperties": false,
+      "properties": {
+        "revoked": { "const": true },
+        "jti": { "type": "string" },
+        "created": { "type": "boolean" }
+      }
+    },
+    "keysListResponse": {
+      "description": "GET /keys — array of JWKS-style public views. The secret is NEVER present anywhere in the response; fingerprint is the first 16 hex chars of SHA-256 over the secret.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/keyPublicView" }
+    },
+    "statsResponse": {
+      "description": "GET /stats — lifetime counters.",
+      "type": "object",
+      "required": ["issued", "verified_ok", "verified_fail", "revoked", "rotations"],
+      "additionalProperties": false,
+      "properties": {
+        "issued": { "type": "integer", "minimum": 0 },
+        "verified_ok": { "type": "integer", "minimum": 0 },
+        "verified_fail": { "type": "integer", "minimum": 0 },
+        "revoked": { "type": "integer", "minimum": 0, "description": "First-time revocations only (re-revokes not counted)." },
+        "rotations": { "type": "integer", "minimum": 0 }
+      }
+    }
+  },
+  "$defs": {
+    "keyPublicView": {
+      "description": "SigningKey.public_view — the only form of a key ever exposed over HTTP.",
+      "type": "object",
+      "required": ["kid", "alg", "fingerprint", "created_ns", "active"],
+      "additionalProperties": false,
+      "properties": {
+        "kid": { "type": "string", "minLength": 1 },
+        "alg": { "const": "HS256" },
+        "fingerprint": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+        "created_ns": { "type": "integer", "minimum": 0 },
+        "active": { "type": "boolean" }
+      }
+    }
+  }
+}

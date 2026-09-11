@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hft-platform/schemas/services/s15-api-gateway.schema.json",
+  "title": "S15 api-gateway — API surface",
+  "description": "Port 7750, prefix API-. External-facing REST gateway: authenticates every non-local request by calling S12 POST /verify, authorizes the route against the token's read/write scopes, then reverse-proxies /portfolio/** to S9 and /settlement/** to S14 (path rewritten by stripping the gateway prefix, query forwarded, upstream status+body passed through verbatim). Local endpoints (served by the gateway itself, no auth): GET /healthz, /readyz, /routes, /stats. Every non-local route requires an 'Authorization: Bearer <token>' header; a 404/405 is answered before auth. Upstream errors pass through verbatim (e.g. a 409 STL-205); the gateway adds its own API- envelope only for transport/auth failures. Errors: API-201 missing token (401), API-202 token rejected (401), API-203 forbidden/scope (403), API-204 bad body (400), API-404 no route (404), API-405 method not allowed (405), API-502 proxy upstream (502), API-503 auth upstream (503, retryable).",
+  "type": "object",
+  "properties": {
+    "authorizationHeader": {
+      "description": "Required on every non-local route. Value must be 'Bearer <token>' (case-insensitive scheme). Missing/malformed => API-201 (401) without contacting S12.",
+      "type": "string",
+      "pattern": "^[Bb]earer [A-Za-z0-9._~+/-]+$"
+    },
+    "portfolioRoutes": {
+      "description": "GET routes proxied to S9 portfolio-analytics (read scope). Path is rewritten by stripping the /portfolio prefix.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "GET /portfolio/pnl",
+          "GET /portfolio/pnl/{symbol}",
+          "GET /portfolio/metrics",
+          "GET /portfolio/var",
+          "GET /portfolio/attribution",
+          "GET /portfolio/history"
+        ]
+      }
+    },
+    "settlementRoutes": {
+      "description": "Routes proxied to S14 settlement-service. Writes (settle/finalize/ingest) require the write scope; reads require the read scope.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "POST /settlement/settle",
+          "POST /settlement/finalize/{date}",
+          "POST /settlement/ingest",
+          "GET /settlement/reports/{date}",
+          "GET /settlement/runs/{date}",
+          "GET /settlement/discrepancies"
+        ]
+      }
+    },
+    "routesResponse": {
+      "description": "GET /routes — the static route table (11 entries). Each entry describes one proxy route; 'path' is the wildcard form /<prefix>/**.",
+      "type": "object",
+      "required": ["routes"],
+      "additionalProperties": true,
+      "properties": {
+        "routes": {
+          "type": "array",
+          "minItems": 11,
+          "maxItems": 11,
+          "items": {
+            "type": "object",
+            "required": ["id", "methods", "path", "upstream", "scopes"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": "string", "description": "Stable route id (e.g. 'pnl-get', 'settle-post')." },
+              "methods": { "type": "array", "items": { "enum": ["GET", "POST"] }, "minItems": 1 },
+              "path": { "type": "string", "pattern": "^/(settlement|portfolio)/\\S+(/\\{[a-z_]+\\})?/\\*\\*$" },
+              "upstream": { "enum": ["portfolio-analytics", "settlement-service"] },
+              "scopes": { "type": "array", "items": { "enum": ["read", "write"] }, "minItems": 1 }
+            }
+          }
+        }
+      }
+    },
+    "statsResponse": {
+      "description": "GET /stats — the gateway's request/auth/proxy counters (apigw.models.GatewayStats.to_json).",
+      "type": "object",
+      "required": [
+        "requests_total", "auth_ok", "auth_rejected", "scope_denied",
+        "auth_upstream_errors", "route_hits", "route_404", "route_405",
+        "proxied", "proxy_upstream_errors"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "requests_total": { "type": "integer", "minimum": 0 },
+        "auth_ok": { "type": "integer", "minimum": 0 },
+        "auth_rejected": { "type": "integer", "minimum": 0 },
+        "scope_denied": { "type": "integer", "minimum": 0 },
+        "auth_upstream_errors": { "type": "integer", "minimum": 0 },
+        "route_hits": { "type": "integer", "minimum": 0 },
+        "route_404": { "type": "integer", "minimum": 0 },
+        "route_405": { "type": "integer", "minimum": 0 },
+        "proxied": { "type": "integer", "minimum": 0 },
+        "proxy_upstream_errors": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "readyz": {
+      "description": "GET /readyz — the common {status, reasons}; readyz probes S12 GET /healthz only (a dead S9/S14 affects individual proxied requests, not gateway readiness).",
+      "type": "object",
+      "required": ["status", "reasons"],
+      "additionalProperties": true,
+      "properties": {
+        "status": { "enum": ["ready", "not_ready"] },
+        "reasons": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "missingTokenError": {
+      "description": "401 — the standard §1.2 envelope for a missing/malformed Authorization header (API-201).",
+      "$ref": "../common/common.schema.json#/properties/errorEnvelope"
+    },
+    "tokenRejectedError": {
+      "description": "401 — S12 returned a 4xx; API-202 with context.detail = '<S12-code>: <reason>' (code only when S12 gave no reason).",
+      "$ref": "../common/common.schema.json#/properties/errorEnvelope"
+    },
+    "forbiddenError": {
+      "description": "403 — the token is valid but lacks the route's required scope (API-203); context carries the required_scope.",
+      "$ref": "../common/common.schema.json#/properties/errorEnvelope"
+    },
+    "noRouteError": {
+      "description": "404 — no route owns the path (API-404); answered before auth. context = {method, path}.",
+      "$ref": "../common/common.schema.json#/properties/errorEnvelope"
+    },
+    "methodNotAllowedError": {
+      "description": "405 — the path's route does not allow the method (API-405); answered before auth. context = {method, path, allowed:[...]}.",
+      "$ref": "../common/common.schema.json#/properties/errorEnvelope"
+    }
+  }
+}

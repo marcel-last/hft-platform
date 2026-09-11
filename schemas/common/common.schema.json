@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hft-platform/schemas/common/common.schema.json",
+  "title": "Common platform endpoints and error envelope",
+  "description": "Schemas shared by all 15 services: /healthz, /readyz, and the CONVENTIONS §1.2 standard error envelope.",
+  "type": "object",
+  "properties": {
+    "healthz": {
+      "description": "GET /healthz — every service. Liveness only (independent of readiness).",
+      "type": "object",
+      "required": ["status", "service", "version"],
+      "additionalProperties": true,
+      "properties": {
+        "status": { "const": "ok" },
+        "service": {
+          "type": "string",
+          "enum": [
+            "market-data-gateway", "order-book-builder", "strategy-engine",
+            "execution-gateway", "risk-manager", "position-keeper",
+            "latency-monitor", "data-quality-monitor", "portfolio-analytics",
+            "alerting-service", "config-service", "auth-service",
+            "audit-logger", "settlement-service", "api-gateway"
+          ],
+          "description": "The service directory name."
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+          "description": "Currently 1.0.0 for every service (CONVENTIONS §12)."
+        }
+      }
+    },
+    "readyz": {
+      "description": "GET /readyz — every service. `reasons` is a flat list of strings; empty when ready.",
+      "type": "object",
+      "required": ["status", "reasons"],
+      "additionalProperties": true,
+      "properties": {
+        "status": { "enum": ["ready", "not_ready"] },
+        "reasons": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "errorEnvelope": {
+      "description": "The CONVENTIONS §1.2 standard error envelope. Every non-2xx JSON response body (and in-band error) uses exactly this shape.",
+      "type": "object",
+      "required": ["error"],
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "type": "object",
+          "required": ["code", "message", "service", "retryable", "context"],
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "type": "string",
+              "pattern": "^(MDG|OBB|STE|EXG|RKM|POS|LAT|DQM|PFA|ALT|CFG|AUT|AUD|STL|API)-[0-9]{3}$",
+              "description": "PREFIX-NNN, three zero-padded digits (CONVENTIONS §1.1)."
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Single sentence, no newlines."
+            },
+            "service": { "type": "string" },
+            "retryable": {
+              "type": "boolean",
+              "description": "true if the caller should retry with backoff (CONVENTIONS §11: max 3 attempts, exponential backoff + jitter)."
+            },
+            "context": {
+              "type": "object",
+              "description": "Service-specific debug fields; may be empty {}."
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,29 @@
+# syntax=docker/dockerfile:1.4
+# Shared image for the 5 Rust (std-only) HFT platform services.
+#
+# Build usage (run from the repo root):
+#   docker build -f deploy/docker/Dockerfile.rust \
+#     --build-arg SERVICE=alerting-service -t hft/alerting-service:1.0.0 .
+#
+# --build-arg SERVICE : services/ subdirectory (kebab-case, matches compose name)
+#
+# Zero external crates — the build needs only the std toolchain, so the build
+# runs fully offline (Cargo.lock is committed and pinned).
+FROM rust:1.80-slim AS builder
+ARG SERVICE
+WORKDIR /src
+COPY services/${SERVICE}/Cargo.toml /src/Cargo.toml
+COPY services/${SERVICE}/Cargo.lock /src/Cargo.lock
+COPY services/${SERVICE}/src/ /src/src/
+RUN cargo build --release --offline
+
+FROM debian:bookworm-slim
+ARG SERVICE
+WORKDIR /app
+COPY --from=builder /src/target/release/${SERVICE} /app/service
+ENV HFT_SERVICE=${SERVICE}
+# No EXPOSE here: compose sets explicit `ports:` per service (7610-7750).
+STOPSIGNAL SIGTERM
+ENTRYPOINT ["/app/service"]
+# S12/S15 accept --bind/--port (compose passes them); S4/S7/S10 take no
+# arguments and bind 0.0.0.0 at their configured port. See deploy/README.md.

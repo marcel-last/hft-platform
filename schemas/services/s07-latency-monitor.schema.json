@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hft-platform/schemas/services/s07-latency-monitor.schema.json",
+  "title": "S7 latency-monitor — API surface",
+  "description": "Port 7670, prefix LAT-. Endpoints (from router): GET /healthz, /readyz, /latency, /latency/{stage}, /percentiles, /budgets; POST /stamp. All latency math is integer nanoseconds (no floats).",
+  "type": "object",
+  "properties": {
+    "stage": {
+      "enum": ["venue_to_gateway", "gateway_to_book", "book_to_signal", "signal_to_order", "order_to_ack"],
+      "description": "Canonical stage wire name (kebab-case). Aliases v2g/g2b/b2s/s2o/o2a are also accepted case-insensitively."
+    },
+    "stageTimestampPairs": {
+      "description": "The (src, dst) timestamp field pair per stage; duration = dst - src. venue_to_gateway=(vt,rt), gateway_to_book=(rt,bt), book_to_signal=(bt,st), signal_to_order=(st,ot), order_to_ack=(ot,at). All int64 ns.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "venue_to_gateway": { "type": "array", "items": { "enum": ["vt", "rt"] }, "maxItems": 2, "minItems": 2 },
+        "gateway_to_book": { "type": "array", "items": { "enum": ["rt", "bt"] }, "maxItems": 2, "minItems": 2 },
+        "book_to_signal": { "type": "array", "items": { "enum": ["bt", "st"] }, "maxItems": 2, "minItems": 2 },
+        "signal_to_order": { "type": "array", "items": { "enum": ["st", "ot"] }, "maxItems": 2, "minItems": 2 },
+        "order_to_ack": { "type": "array", "items": { "enum": ["ot", "at"] }, "maxItems": 2, "minItems": 2 }
+      }
+    },
+    "stampRequest": {
+      "description": "POST /stamp. A single latency observation. Two accepted forms: (1) pre-computed {stage, duration_ns, ...} — duration_ns must be >= 0; (2) a raw stage timestamp pair {stage, <src>, <dst>, ...} where src/dst come from the stage's pair (see stageTimestampPairs). Optional: symbol/sym, venue/ven, order_id/ord, id.",
+      "type": "object",
+      "required": ["stage"],
+      "oneOf": [
+        { "required": ["duration_ns"] },
+        {
+          "anyOf": [
+            { "required": ["vt", "rt"] },
+            { "required": ["rt", "bt"] },
+            { "required": ["bt", "st"] },
+            { "required": ["st", "ot"] },
+            { "required": ["ot", "at"] }
+          ]
+        }
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "stage": { "$ref": "#/$defs/stageEnum" },
+        "duration_ns": { "type": "integer", "minimum": 0, "description": "Pre-computed stage duration, int64 ns. Rejected if negative." },
+        "vt": { "type": "integer", "minimum": 0 },
+        "rt": { "type": "integer", "minimum": 0 },
+        "bt": { "type": "integer", "minimum": 0 },
+        "st": { "type": "integer", "minimum": 0 },
+        "ot": { "type": "integer", "minimum": 0 },
+        "at": { "type": "integer", "minimum": 0 },
+        "symbol": { "type": "string", "description": "Canonical symbol (alias: sym)." },
+        "venue": { "type": "string", "description": "Venue id (alias: ven)." },
+        "order_id": { "type": "string", "description": "Order id (alias: ord)." },
+        "id": { "type": "string", "description": "Optional sample id; absent => STAMP-<stage>-<ts_ns>." }
+      }
+    }
+  },
+  "$defs": {
+    "stageEnum": {
+      "enum": ["venue_to_gateway", "gateway_to_book", "book_to_signal", "signal_to_order", "order_to_ack"],
+      "description": "Canonical stage wire name (kebab-case); aliases v2g/g2b/b2s/s2o/o2a accepted case-insensitively by the service."
+    }
+  }
+}

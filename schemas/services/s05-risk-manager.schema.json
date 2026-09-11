@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hft-platform/schemas/services/s05-risk-manager.schema.json",
+  "title": "S5 risk-manager — API surface",
+  "description": "Port 7650, prefix RKM-. Endpoints (from router): GET /healthz, /readyz, /limits, /exposure, /kill-switch, /breaches, /stats; PUT /limits; DELETE /limits (reset); POST /pre-trade-check; POST /kill-switch (engage); POST /kill-switch/disengage. Pre-trade check returns 200 when allowed, 409 when vetoed (HARD breach).",
+  "type": "object",
+  "properties": {
+    "preTradeCheckRequest": {
+      "description": "POST /pre-trade-check. Advisory/veto: the risk manager never mutates positions here. Required: symbol, side, qty (non-zero). limit_px defaults to 0.0 (market).",
+      "type": "object",
+      "required": ["symbol", "side", "qty"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "description": "Optional request id; absent => PRT-<now_ns>." },
+        "symbol": { "type": "string", "minLength": 1, "description": "Canonical symbol (alias: sym)." },
+        "side": { "enum": ["BUY", "SELL"] },
+        "qty": { "type": "integer", "description": "Quantity in lots; must be non-zero (may be negative to denote a reduce/flip in some callers; the parser rejects 0)." },
+        "limit_px": { "type": "number", "description": "Limit price (aliases: limit_price, px). Defaults to 0.0." },
+        "strategy_id": { "type": "string" },
+        "signal_id": { "type": "string" }
+      }
+    },
+    "preTradeCheckResponse": {
+      "description": "CheckResult.to_dict(request) + checked_ns. HTTP 200 when allowed, 409 when vetoed (hard_breached=true). Escalation of HARD breaches (kill-switch / S10 alert / S13 audit) is best-effort and never blocks the response.",
+      "type": "object",
+      "required": ["allowed", "breached", "hard_breached", "request_id", "symbol", "side", "qty", "limit_px", "notional", "verdicts", "checked_ns"],
+      "additionalProperties": false,
+      "properties": {
+        "allowed": { "type": "boolean" },
+        "breached": { "type": "boolean", "description": "true if any verdict failed (SOFT or HARD)." },
+        "hard_breached": { "type": "boolean", "description": "true if any HARD verdict failed (=> veto, HTTP 409)." },
+        "request_id": { "type": "string", "description": "The (server-stamped if absent) request id, e.g. PRT-<now_ns>." },
+        "symbol": { "type": "string" },
+        "side": { "enum": ["BUY", "SELL"] },
+        "qty": { "type": "integer" },
+        "limit_px": { "type": "number" },
+        "notional": { "type": "number", "description": "abs(qty) * limit_px, rounded to 4 decimals." },
+        "verdicts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "passed", "severity", "detail", "context"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string", "description": "Named check (e.g. kill_switch, param_sanity, velocity, open_order_cap, position_limit, notional_limit, portfolio_notional)." },
+              "passed": { "type": "boolean" },
+              "severity": { "enum": ["NONE", "SOFT", "HARD"], "description": "HARD => veto; SOFT => warn without veto." },
+              "detail": { "type": "string" },
+              "context": { "type": "object" }
+            }
+          }
+        },
+        "checked_ns": { "type": "integer", "minimum": 0, "description": "Wall-clock time the check ran, int64 ns." }
+      }
+    },
+    "limits": {
+      "description": "RiskLimits (PUT /limits body, GET /limits response). PUT accepts any subset and merges; DELETE /limits resets to defaults.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_position_qty": { "type": "integer" },
+        "max_notional_per_symbol": { "type": "number" },
+        "max_portfolio_notional": { "type": "number" },
+        "max_order_qty": { "type": "integer" },
+        "max_order_notional": { "type": "number" },
+        "min_price": { "type": "number" },
+        "symbol_overrides": {
+          "type": "object",
+          "description": "Per-symbol overrides keyed by canonical symbol; values may override max_position_qty / max_notional_per_symbol.",
+          "additionalProperties": { "type": "object" }
+        }
+      }
+    },
+    "killSwitchRequest": {
+      "description": "POST /kill-switch (engage) and POST /kill-switch/disengage. Both accept an optional actor/note.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "actor": { "type": "string" },
+        "note": { "type": "string" }
+      }
+    }
+  }
+}
