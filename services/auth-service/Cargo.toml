@@ -1,0 +1,18 @@
+[package]
+name = "auth-service"
+version = "1.0.0"
+edition = "2021"
+description = "S12 auth-service: JWT (HS256) issue / verify / revoke + public key view"
+
+[lib]
+name = "authsvc"
+path = "src/lib.rs"
+
+[[bin]]
+name = "auth-service"
+path = "src/main.rs"
+
+[dependencies]
+
+[profile.release]
+opt-level = 3

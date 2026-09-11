@@ -1,0 +1,21 @@
+[package]
+name = "latency-monitor"
+version = "1.0.0"
+edition = "2021"
+description = "HFT platform service S7: measures end-to-end pipeline latency (venue->gateway->book->signal->order->ack), maintains rolling percentiles (p50/p99/p999) and fires alerts on budget breaches"
+license = "MIT"
+
+[[bin]]
+name = "latency-monitor"
+path = "src/main.rs"
+
+[lib]
+name = "latmon"
+path = "src/lib.rs"
+
+[dependencies]
+# Intentionally empty — the platform constraint is std-only (no external crates).
+
+[profile.release]
+opt-level = 3
+lto = true
