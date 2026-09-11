@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HFT Platform — Dashboard</title>
+<link rel="stylesheet" href="/static/dashboard.css">
+</head>
+<body>
+<header id="topbar">
+  <div class="brand">
+    <span class="brand-mark">HFT</span>
+    <span class="brand-name">platform dashboard</span>
+    <span id="readonly-badge" class="badge badge-hidden" title="Dashboard started with --read-only; write routes are refused with 403 UI-205.">READ-ONLY</span>
+  </div>
+  <nav id="tabnav" aria-label="Panels">
+    <button class="tab active" data-tab="portfolio" aria-selected="true">Portfolio</button>
+    <button class="tab" data-tab="settlement" aria-selected="false">Settlement</button>
+    <button class="tab" data-tab="live" aria-selected="false">Live</button>
+    <button class="tab" data-tab="alerts" aria-selected="false">Alerts &amp; Audit</button>
+  </nav>
+  <div id="clock" class="topbar-right" title="Local time"></div>
+</header>
+
+<!-- Panel 1: health grid (top bar, PLAN §4.2.1) -->
+<section id="panel-health" aria-label="Service health" aria-live="polite">
+  <div class="health-grid" id="health-grid">
+    <!-- 15 tiles, one per service port, rendered by dashboard.js from /api/health -->
+  </div>
+</section>
+
+<main id="panels">
+  <!-- Panel 2: portfolio (PLAN §4.2.2) -->
+  <section id="panel-portfolio" class="panel active" aria-label="Portfolio">
+    <div class="toolbar">
+      <span class="toolbar-label">Portfolio analytics</span>
+      <label class="toolbar-control" for="pf-symbol-filter">symbol filter</label>
+      <input id="pf-symbol-filter" type="text" placeholder="e.g. EU_STOXX50_CONT" autocomplete="off">
+      <button id="pf-refresh" class="btn" type="button">Refresh</button>
+    </div>
+    <div class="card-row" id="pf-totals">
+      <div class="card"><div class="card-k">total P&amp;L</div><div class="card-v" id="pf-total-pnl">–</div></div>
+      <div class="card"><div class="card-k">realized</div><div class="card-v" id="pf-realized">–</div></div>
+      <div class="card"><div class="card-k">unrealized</div><div class="card-v" id="pf-unrealized">–</div></div>
+      <div class="card"><div class="card-k">market value</div><div class="card-v" id="pf-mv">–</div></div>
+    </div>
+    <div class="card-row" id="pf-metrics">
+      <div class="card"><div class="card-k">Sharpe</div><div class="card-v" id="pf-sharpe">–</div></div>
+      <div class="card"><div class="card-k">Sortino / win rate</div><div class="card-v" id="pf-sortino">–</div></div>
+      <div class="card"><div class="card-k">max drawdown</div><div class="card-v" id="pf-maxdd">–</div></div>
+      <div class="card"><div class="card-k">current drawdown</div><div class="card-v" id="pf-curdd">–</div></div>
+    </div>
+    <div class="panel-cols">
+      <div class="col col-wide">
+        <h3 class="sec">P&amp;L by symbol <span class="sec-hint">click a row for drilldown</span></h3>
+        <div class="table-wrap">
+          <table id="pf-pnl-table">
+            <thead><tr>
+              <th>symbol</th><th>account</th><th class="num">net qty</th><th>side</th>
+              <th class="num">avg px</th><th class="num">mark</th><th class="num">mkt value</th>
+              <th class="num">realized</th><th class="num">unrealized</th><th class="num">total</th>
+            </tr></thead>
+            <tbody id="pf-pnl-rows"></tbody>
+          </table>
+        </div>
+        <div id="pf-drilldown" class="drilldown" hidden>
+          <div class="drilldown-head">
+            <span id="pf-drilldown-title">drilldown</span>
+            <button id="pf-drilldown-close" class="btn btn-sm" type="button">close</button>
+          </div>
+          <pre id="pf-drilldown-body" class="json-pre"></pre>
+        </div>
+      </div>
+      <div class="col">
+        <h3 class="sec">Value at Risk</h3>
+        <div id="pf-var" class="var-wrap">
+          <div class="card-k">loading…</div>
+        </div>
+        <h3 class="sec">Attribution</h3>
+        <div id="pf-attribution" class="attr-list"></div>
+        <h3 class="sec">Equity sparkline <span class="sec-hint">/portfolio/history</span></h3>
+        <canvas id="pf-spark" width="520" height="140" aria-label="Equity sparkline"></canvas>
+      </div>
+    </div>
+  </section>
+
+  <!-- Panel 3: settlement (PLAN §4.2.3) -->
+  <section id="panel-settlement" class="panel" aria-label="Settlement">
+    <div class="toolbar">
+      <span class="toolbar-label">Settlement</span>
+      <label class="toolbar-control" for="stl-date">date</label>
+      <input id="stl-date" type="date">
+      <button id="stl-refresh" class="btn" type="button">Refresh</button>
+      <button id="stl-finalize" class="btn btn-warn" type="button" disabled>Finalize EOD</button>
+    </div>
+    <div class="panel-cols">
+      <div class="col">
+        <h3 class="sec">Run <span class="sec-hint">/settlement/runs/{date}</span></h3>
+        <div id="stl-run" class="json-pre-wrap"><div class="card-k">pick a date and refresh</div></div>
+        <h3 class="sec">Discrepancies <span class="sec-hint">/settlement/discrepancies</span></h3>
+        <div class="table-wrap">
+          <table id="stl-disc-table">
+            <thead><tr><th>date</th><th>venue</th><th>symbol</th><th>kind</th><th>severity</th><th class="num">our qty</th><th class="num">stmt qty</th><th class="num">qty Δ</th></tr></thead>
+            <tbody id="stl-disc-rows"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="col">
+        <h3 class="sec">Report <span class="sec-hint">/settlement/reports/{date}</span></h3>
+        <div id="stl-report" class="json-pre-wrap"><div class="card-k">–</div></div>
+        <h3 class="sec">Settle <span class="sec-hint">POST /settlement/settle (write)</span></h3>
+        <form id="stl-settle-form" class="settle-form">
+          <label>date<input id="stl-settle-date" type="date" required></label>
+          <label>venue<input id="stl-settle-venue" type="text" value="EUREX" required></label>
+          <label>symbol<input id="stl-settle-symbol" type="text" value="EU_STOXX50_CONT" required></label>
+          <label>side
+            <select id="stl-settle-side"><option>BUY</option><option>SELL</option></select>
+          </label>
+          <label>price<input id="stl-settle-px" type="number" step="any" value="5001" required></label>
+          <label>qty<input id="stl-settle-qty" type="number" step="1" min="1" value="1" required></label>
+          <button id="stl-settle-submit" class="btn" type="submit">Submit fill</button>
+        </form>
+        <pre id="stl-settle-result" class="json-pre" hidden></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- Panel 4: live (PLAN §4.2.4) -->
+  <section id="panel-live" class="panel" aria-label="Live stream">
+    <div class="toolbar">
+      <span class="toolbar-label">Live event stream</span>
+      <span id="live-state" class="badge">connecting…</span>
+      <span class="toolbar-spacer"></span>
+      <span id="live-count" class="muted">0 events</span>
+    </div>
+    <div id="live-sources" class="chip-row" aria-label="Source health chips"></div>
+    <div class="feed-wrap">
+      <ul id="live-feed" class="feed" aria-live="off"></ul>
+    </div>
+  </section>
+
+  <!-- Panel 5: alerts & audit (PLAN §4.2.5) -->
+  <section id="panel-alerts" class="panel" aria-label="Alerts and audit">
+    <div class="panel-cols">
+      <div class="col">
+        <h3 class="sec">Alerts <span class="sec-hint">stream kind=alert, client-filtered</span></h3>
+        <ul id="alerts-list" class="event-list"></ul>
+      </div>
+      <div class="col">
+        <h3 class="sec">Audit events <span class="sec-hint">stream kind=audit-event, client-filtered</span></h3>
+        <ul id="audit-list" class="event-list"></ul>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- Panel 6: gateway stats footer strip (PLAN §4.2.6) -->
+<footer id="panel-gateway" aria-label="Gateway statistics">
+  <span class="gw-label">gateway</span>
+  <span id="gw-stats" class="gw-stats muted">–</span>
+</footer>
+
+<div id="toasts" class="toasts" aria-live="assertive"></div>
+<script src="/static/dashboard.js"></script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+[project]
+name = "hft-dashboard"
+version = "1.0.0"
+description = "HFT platform operations dashboard (tool, not a service) — API proxy, health sweep, live stream, UI"
+requires-python = ">=3.10"
+dependencies = []  # stdlib only (CONVENTIONS §3)
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
